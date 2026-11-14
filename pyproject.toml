@@ -1,0 +1,68 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mt5ctl"
+version = "0.1.0.dev0"
+description = "Idempotent expert-advisor deploys for MetaTrader 5 terminals (Wine, WSL2, Windows)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "Pavel Volkov", email = "pvolkov@live.ru" }]
+keywords = ["metatrader", "mt5", "mql5", "trading", "expert-advisor", "wine", "deploy"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Financial and Insurance Industry",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Office/Business :: Financial :: Investment",
+    "Topic :: System :: Systems Administration",
+    "Typing :: Typed",
+]
+dependencies = ["pyyaml>=6.0"]
+
+[project.urls]
+Homepage = "https://github.com/ak40u/mt5ctl"
+Repository = "https://github.com/ak40u/mt5ctl"
+Issues = "https://github.com/ak40u/mt5ctl/issues"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "types-pyyaml>=6.0",
+]
+
+[project.scripts]
+mt5ctl = "mt5ctl.cli:entrypoint"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mt5ctl"]
+
+[tool.ruff]
+line-length = 95
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "C4", "PTH", "RUF"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src/mt5ctl"]
+warn_unused_ignores = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.coverage.run]
+source = ["mt5ctl"]
+branch = true
