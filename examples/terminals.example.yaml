@@ -1,0 +1,41 @@
+# mt5ctl terminal registry.
+# Copy to ~/.config/mt5ctl/terminals.yaml (or point MT5CTL_CONFIG at it) and edit.
+# Keep the real file private: it names your hosts and data folders.
+
+hosts:
+  # This machine: data folders are read directly. Use it for a Wine prefix on
+  # the machine running mt5ctl, or for a Windows terminal when mt5ctl runs on
+  # that Windows host.
+  workstation:
+    kind: local
+
+  # A Linux server reached over SSH (an alias from ~/.ssh/config or user@host).
+  # Key-based login is required: mt5ctl runs ssh with BatchMode=yes.
+  vps:
+    kind: ssh
+    ssh: trader@vps.example.com
+
+  # A Windows server whose terminals run under Wine inside WSL2.
+  farm:
+    kind: wsl
+    ssh: farm.example.com
+    wsl_distro: Ubuntu-24.04
+
+terminals:
+  local-demo:
+    host: workstation
+    # The folder that contains MQL5/ — the install folder for a terminal
+    # started with /portable.
+    data_dir: /home/trader/.wine/drive_c/Program Files/MetaTrader 5
+    env: demo
+
+  vps-live:
+    host: vps
+    data_dir: /home/trader/mt5/live
+    profile: Default        # chart profile under MQL5/Profiles/Charts (default: Default)
+    env: live               # changing a live terminal requires explicit confirmation
+
+  farm-demo1:
+    host: farm
+    data_dir: /home/trader/mt5/demo1
+    env: demo
