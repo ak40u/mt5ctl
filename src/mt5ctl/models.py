@@ -28,6 +28,17 @@ class HostKind(StrEnum):
     WSL = "wsl"
 
 
+class ServiceScope(StrEnum):
+    """Which systemd instance supervises the terminal.
+
+    ``SYSTEM`` units are controlled with ``sudo -n systemctl`` unless mt5ctl
+    already runs as root; ``USER`` units with ``systemctl --user``.
+    """
+
+    SYSTEM = "system"
+    USER = "user"
+
+
 class Env(StrEnum):
     """Risk tier. Changing a ``live`` terminal requires explicit confirmation."""
 
@@ -63,6 +74,13 @@ class Terminal:
     profile: str = DEFAULT_PROFILE
     """Chart profile mt5ctl manages (``MQL5/Profiles/Charts/<profile>``)."""
     env: Env = Env.DEMO
+    service: str | None = None
+    """systemd unit running the terminal; required by deploy, status and restart."""
+    service_scope: ServiceScope = ServiceScope.SYSTEM
+    wineprefix: str | None = None
+    """``WINEPREFIX`` for running MetaEditor (compile); Wine's default when unset."""
+    display: str | None = None
+    """X display for MetaEditor under Wine, e.g. ``:99``."""
 
 
 @dataclass(frozen=True, slots=True)

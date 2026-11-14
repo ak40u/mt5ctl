@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 authors = [{ name = "Pavel Volkov", email = "pvolkov@live.ru" }]
-keywords = ["metatrader", "mt5", "mql5", "trading", "expert-advisor", "wine", "deploy"]
+keywords = ["metatrader", "mt5", "mql5", "trading", "expert-advisor", "wine", "deploy", "mcp"]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
     "Intended Audience :: Developers",
@@ -23,7 +23,7 @@ classifiers = [
     "Topic :: System :: Systems Administration",
     "Typing :: Typed",
 ]
-dependencies = ["pyyaml>=6.0"]
+dependencies = ["anyio>=4.0", "mcp>=2.0,<3", "pyyaml>=6.0"]
 
 [project.urls]
 Homepage = "https://github.com/ak40u/mt5ctl"
@@ -52,6 +52,10 @@ src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "C4", "PTH", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+# Embedded bash templates: wrapping a shell line would change the script.
+"src/mt5ctl/scripts.py" = ["E501"]
 
 [tool.mypy]
 python_version = "3.11"

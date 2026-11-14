@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# systemctl stand-in for the test suite. Unit state lives in $FAKE_SYSTEMD:
+#   <unit>.state     active | inactive | deactivating ...
+#   <unit>.on-stop   executable run when the unit stops (terminal saving charts)
+#   <unit>.on-start  executable run when the unit starts (terminal writing its journal)
+#   <unit>.fail-<action>         makes that action fail without doing it
+#   <unit>.fail-after-<action>   does the action, then reports failure (a dropped link)
+#   calls            one line per state-changing call
+set -u
+D="${FAKE_SYSTEMD:?}"
+[ "${1:-}" = "--user" ] && shift
+cmd="${1:-}"; shift || true
+state() { cat "$D/$1.state" 2>/dev/null || echo inactive; }
+case "$cmd" in
+  is-active)
+    st=$(state "$1"); echo "$st"; [ "$st" = active ] ;;
+  start|stop|restart)
+    u="$1"; echo "$cmd $u" >> "$D/calls"
+    [ -f "$D/$u.fail-$cmd" ] && { echo "fake: $cmd failed" >&2; exit 1; }
+    if [ "$cmd" != start ]; then
+      [ -x "$D/$u.on-stop" ] && "$D/$u.on-stop"
+      [ -f "$D/$u.stuck" ] && { echo deactivating > "$D/$u.state"; exit 0; }
+      echo inactive > "$D/$u.state"
+    fi
+    if [ "$cmd" != stop ]; then
+      echo active > "$D/$u.state"
+      [ -x "$D/$u.on-start" ] && "$D/$u.on-start"
+    fi
+    [ -f "$D/$u.fail-after-$cmd" ] && { echo "fake: connection lost" >&2; exit 255; }
+    exit 0 ;;
+  show)
+    prop="$2"; u="$4"
+    case "$prop" in
+      User) cat "$D/$u.user" 2>/dev/null || true ;;
+      ActiveEnterTimestampMonotonic) echo 0 ;;
+      *) echo "" ;;
+    esac ;;
+  *) echo "fake systemctl: unsupported command $cmd" >&2; exit 2 ;;
+esac

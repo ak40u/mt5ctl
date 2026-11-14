@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# wine + metaeditor64.exe stand-in. For /compile:<folder> it "compiles" every .mq5
+# in the folder (not recursively) unless the source contains '#error', and
+# writes the /log:<file> in UTF-16LE with the summary line MetaEditor writes.
+set -u
+dir=""; log=""
+for a in "$@"; do
+  case "$a" in /compile:*) dir="${a#/compile:}" ;; /log:*) log="${a#/log:}" ;; esac
+done
+[ -n "$dir" ] || exit 1
+[ -n "$log" ] || log="$dir/${dir##*/}.log"
+errors=0
+for src in "$dir"/*.mq5; do
+  [ -f "$src" ] || continue
+  if grep -q '#error' "$src"; then errors=$((errors + 1)); else printf 'EX5' > "${src%.mq5}.ex5"; fi
+done
+printf 'compiling\r\nResult: %d errors, 0 warnings, 780 ms elapsed\r\n' "$errors" | iconv -f UTF-8 -t UTF-16LE > "$log"
+exit 1   # MetaEditor's exit code is meaningless; the result must be judged by output

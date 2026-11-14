@@ -38,6 +38,26 @@ class StateError(Mt5ctlError):
     """A terminal's current state could not be collected or read back."""
 
 
+class DeployError(Mt5ctlError):
+    """A deploy, adopt or restart cannot proceed safely, or its apply failed."""
+
+
+class CompileError(Mt5ctlError):
+    """MetaEditor reported errors or produced no ``.ex5`` for a source."""
+
+
+class ConfirmationRequiredError(Mt5ctlError):
+    """A change to a live terminal was requested without explicit confirmation."""
+
+    def __init__(self, terminal_id: str, action: str) -> None:
+        self.terminal_id = terminal_id
+        self.action = action
+        super().__init__(
+            f"refusing to {action} live terminal {terminal_id!r} without confirmation; "
+            "pass --confirm-live (CLI) or confirm=true (MCP)"
+        )
+
+
 class RemoteCommandError(Mt5ctlError):
     """A command executed over SSH exited non-zero or timed out."""
 

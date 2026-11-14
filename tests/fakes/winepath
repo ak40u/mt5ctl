@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# winepath stand-in: the fake wine understands host paths directly.
+[ "$1" = "-w" ] && shift
+printf '%s\n' "$1"

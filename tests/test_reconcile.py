@@ -40,7 +40,7 @@ def state(
 
 def test_first_deploy_adds_everything() -> None:
     plan = compute_plan(bundle({C1: "chart:1", A: "sha256:a"}, {C1: A}), state())
-    assert plan == DeployPlan(add=(A, C1))
+    assert plan == DeployPlan(add=(A, C1), order=("chart01.chr",))
     assert plan.has_changes and not plan.blocked
 
 
@@ -191,3 +191,56 @@ def test_profile_mismatch_is_refused() -> None:
 def test_empty_manifest_behaves_like_first_deploy_for_free_paths() -> None:
     plan = compute_plan(bundle({A: "sha256:a"}), state(manifest={}))
     assert plan.add == (A,)
+
+
+def test_numbering_gap_is_noted() -> None:
+    plan = compute_plan(bundle({C1: "chart:1", C3: "chart:3"}), state())
+    assert any("chart02 missing" in n for n in plan.notes)
+
+
+def test_bundle_numbered_around_foreign_chart_has_no_gap_note() -> None:
+    plan = compute_plan(bundle({C1: "chart:1", C3: "chart:3"}), state(charts={C2: None}))
+    assert plan.foreign == (C2,)
+    assert not any("gaps" in n for n in plan.notes)
+
+
+def test_gap_check_follows_the_spec_switch(monkeypatch: pytest.MonkeyPatch) -> None:
+    from mt5ctl import mt5spec
+
+    monkeypatch.setattr(mt5spec, "CHARTS_CONTIGUOUS", False)
+    plan = compute_plan(bundle({C3: "chart:3"}), state())
+    assert plan.notes == ()
+
+
+# -- window order ----------------------------------------------------------- #
+
+
+def test_order_drops_removed_appends_added_and_keeps_foreign_places() -> None:
+    plan = compute_plan(
+        bundle({C1: "chart:1", C3: "chart:3"}),
+        TerminalState(
+            manifest=Manifest("Default", {C1: "chart:1", C2: "chart:2"}),
+            files={C1: "chart:1"},
+            charts={C1: None, C2: None, W: None},
+            order=("chart09.chr", "chart02.chr", "chart01.chr"),
+        ),
+    )
+    assert plan.remove == (C2,)
+    assert plan.order == ("chart09.chr", "chart01.chr", "chart03.chr")
+
+
+def test_order_unchanged_is_none() -> None:
+    plan = compute_plan(
+        bundle({C1: "chart:1"}),
+        TerminalState(
+            manifest=Manifest("Default", {C1: "chart:1"}),
+            files={C1: "chart:1"},
+            charts={C1: None},
+            order=("chart01.chr",),
+        ),
+    )
+    assert plan.order is None
+
+
+def test_no_charts_no_order_file() -> None:
+    assert compute_plan(bundle({A: "sha256:a"}), state()).order is None

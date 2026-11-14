@@ -10,7 +10,7 @@ import yaml
 
 from mt5ctl.config import load_registry, parse_registry, resolve_path
 from mt5ctl.errors import ConfigError, UnknownTargetError
-from mt5ctl.models import Env, HostKind, Registry
+from mt5ctl.models import Env, HostKind, Registry, ServiceScope
 
 EXAMPLE = Path(__file__).parents[1] / "examples" / "terminals.example.yaml"
 
@@ -24,6 +24,25 @@ def test_example_registry_parses() -> None:
     assert reg.terminals
     kinds = {reg.host_of(t).kind for t in reg.terminals.values()}
     assert kinds == {HostKind.LOCAL, HostKind.SSH, HostKind.WSL}
+
+
+def test_lifecycle_fields() -> None:
+    reg = registry(
+        {"here": {}},
+        {
+            "t1": {
+                "host": "here",
+                "data_dir": "/d",
+                "service": "mt5@demo1.service",
+                "service_scope": "user",
+                "wineprefix": "/home/t/.wine",
+                "display": ":99",
+            }
+        },
+    )
+    term = reg.terminal("t1")
+    assert (term.service, term.service_scope) == ("mt5@demo1.service", ServiceScope.USER)
+    assert (term.wineprefix, term.display) == ("/home/t/.wine", ":99")
 
 
 def test_defaults() -> None:
@@ -67,6 +86,13 @@ def test_unknown_terminal_lists_known() -> None:
         ({"h": {}}, {"t": {"host": "h", "data_dir": "/d", "profile": "../x"}}, "profile"),
         ({"h": {}}, {"bad id": {"host": "h", "data_dir": "/d"}}, "invalid"),
         ({"h": []}, {"t": {"host": "h", "data_dir": "/d"}}, "expected a mapping"),
+        ({"h": {}}, {"t": {"host": "h", "data_dir": "/d", "service": "a b"}}, "unit name"),
+        (
+            {"h": {}},
+            {"t": {"host": "h", "data_dir": "/d", "service_scope": "global"}},
+            "service_scope",
+        ),
+        ({"h": {}}, {"t": {"host": "h", "data_dir": "/d", "display": "99"}}, "display"),
     ],
 )
 def test_invalid_registries(

@@ -10,8 +10,8 @@ indicator windows. The format is line-oriented:
   ``=`` themselves;
 * any other line (blank lines included) is kept verbatim.
 
-The terminal writes these files as UTF-16LE with a byte-order mark and CRLF line
-endings, but files written by other tools may be UTF-8. :class:`ChartFile`
+The terminal writes these files as UTF-16 text (see :mod:`mt5ctl.mt5spec`), but
+files written by other tools may be UTF-8. :class:`ChartFile`
 remembers the encoding, BOM, line ending and trailing newline it was read with,
 and writes them back unchanged, so ``parse(data).to_bytes() == data`` holds for
 every well-formed file. That property is what makes editing safe: changing one
@@ -24,15 +24,28 @@ ordered tree of :class:`Entry`, :class:`Text` and :class:`Section` nodes.
 
 from __future__ import annotations
 
-import codecs
 import hashlib
 import json
 import re
 from dataclasses import dataclass, field
-from enum import IntEnum
 from pathlib import Path
 
+from . import mt5spec
 from .errors import ChartFormatError
+from .text import TextDecodeError, TextFormat, decode
+
+__all__ = [
+    "ChartFile",
+    "Entry",
+    "Expert",
+    "Node",
+    "Section",
+    "Text",
+    "TextFormat",
+    "Timeframe",
+    "decode",
+    "parse_nodes",
+]
 
 _TAG_RE = re.compile(r"<(/?)([A-Za-z_][A-Za-z0-9_]*)>")
 
@@ -41,129 +54,46 @@ _TAG_RE = re.compile(r"<(/?)([A-Za-z_][A-Za-z0-9_]*)>")
 # Timeframes
 # --------------------------------------------------------------------------- #
 
-
-class PeriodUnit(IntEnum):
-    """The ``period_type`` value of a chart: the unit ``period_size`` counts in."""
-
-    MINUTE = 0
-    HOUR = 1
-    DAY = 2
-    WEEK = 3
-    MONTH = 4
-
-
-_UNIT_PREFIX = {
-    PeriodUnit.MINUTE: "M",
-    PeriodUnit.HOUR: "H",
-    PeriodUnit.DAY: "D",
-    PeriodUnit.WEEK: "W",
-    PeriodUnit.MONTH: "MN",
-}
-
-# The 21 timeframes MetaTrader 5 offers (ENUM_TIMEFRAMES).
-_VALID_SIZES = {
-    PeriodUnit.MINUTE: (1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30),
-    PeriodUnit.HOUR: (1, 2, 3, 4, 6, 8, 12),
-    PeriodUnit.DAY: (1,),
-    PeriodUnit.WEEK: (1,),
-    PeriodUnit.MONTH: (1,),
-}
-
 _TIMEFRAME_RE = re.compile(r"(MN|M|H|D|W)([0-9]+)")
 
 
 @dataclass(frozen=True, slots=True)
 class Timeframe:
-    """A chart timeframe such as ``H4``, stored as ``period_type``/``period_size``."""
+    """A chart timeframe by its usual name (``M15``, ``H4``, ``D1``).
 
-    unit: PeriodUnit
-    size: int
+    Only timeframes whose chart-file encoding is known are accepted; see
+    :data:`mt5ctl.mt5spec.PERIOD_CODES`.
+    """
+
+    name: str
 
     def __post_init__(self) -> None:
-        if self.size not in _VALID_SIZES[self.unit]:
-            raise ValueError(
-                f"MetaTrader 5 has no {_UNIT_PREFIX[self.unit]}{self.size} timeframe"
-            )
+        if self.name not in mt5spec.PERIOD_CODES:
+            known = ", ".join(mt5spec.PERIOD_CODES)
+            raise ValueError(f"unsupported timeframe {self.name!r} (known: {known})")
 
     @classmethod
     def parse(cls, text: str) -> Timeframe:
-        """Parse the conventional name (``M15``, ``H4``, ``D1``, ``MN1``)."""
-        match = _TIMEFRAME_RE.fullmatch(text.strip().upper())
-        if match is None:
+        """Parse a name such as ``m15`` or ``H4``."""
+        name = text.strip().upper()
+        if not _TIMEFRAME_RE.fullmatch(name):
             raise ValueError(f"not a timeframe: {text!r} (expected e.g. M15, H1, H4, D1)")
-        prefix, size = match.groups()
-        unit = next(u for u, p in _UNIT_PREFIX.items() if p == prefix)
-        return cls(unit, int(size))
-
-    def __str__(self) -> str:
-        return f"{_UNIT_PREFIX[self.unit]}{self.size}"
-
-
-# --------------------------------------------------------------------------- #
-# File-level text format
-# --------------------------------------------------------------------------- #
-
-
-@dataclass(frozen=True, slots=True)
-class TextFormat:
-    """How a chart file's text was encoded on disk, so it can be written back alike."""
-
-    encoding: str
-    """Python codec name: ``utf-16-le``, ``utf-16-be``, ``utf-8`` or ``cp1252``."""
-    bom: bool
-    newline: str
-    """``\\r\\n`` or ``\\n``."""
-    final_newline: bool
+        return cls(name)
 
     @classmethod
-    def terminal_default(cls) -> TextFormat:
-        """The format MetaTrader 5 itself writes: UTF-16LE, BOM, CRLF."""
-        return cls(encoding="utf-16-le", bom=True, newline="\r\n", final_newline=True)
+    def from_codes(cls, period_type: int, period_size: int) -> Timeframe | None:
+        """The timeframe stored as ``period_type``/``period_size``, if known."""
+        codes = (period_type, period_size)
+        return next(
+            (cls(name) for name, value in mt5spec.PERIOD_CODES.items() if value == codes), None
+        )
 
+    @property
+    def codes(self) -> tuple[int, int]:
+        return mt5spec.PERIOD_CODES[self.name]
 
-_BOMS = (
-    (codecs.BOM_UTF8, "utf-8"),
-    (codecs.BOM_UTF16_LE, "utf-16-le"),
-    (codecs.BOM_UTF16_BE, "utf-16-be"),
-)
-
-
-def _bom_bytes(encoding: str) -> bytes:
-    return next(bom for bom, enc in _BOMS if enc == encoding)
-
-
-def decode(data: bytes) -> tuple[str, TextFormat]:
-    """Decode chart-file bytes, detecting the encoding.
-
-    A byte-order mark decides when present. Without one, a NUL in the second
-    byte means BOM-less UTF-16LE (chart files start with ASCII ``<``); otherwise
-    UTF-8 is tried, then Windows-1252, the code page older tools write.
-    """
-    encoding: str | None = None
-    bom = False
-    body = data
-    for mark, enc in _BOMS:
-        if data.startswith(mark):
-            encoding, bom, body = enc, True, data[len(mark) :]
-            break
-    if encoding is None:
-        if len(data) >= 2 and data[0] != 0 and data[1] == 0:
-            encoding = "utf-16-le"
-        else:
-            try:
-                data.decode("utf-8")
-                encoding = "utf-8"
-            except UnicodeDecodeError:
-                encoding = "cp1252"
-    try:
-        text = body.decode(encoding)
-    except UnicodeDecodeError as exc:
-        raise ChartFormatError(f"cannot decode chart file as {encoding}: {exc}") from None
-    newline = "\r\n" if "\r\n" in text else "\n"
-    fmt = TextFormat(
-        encoding=encoding, bom=bom, newline=newline, final_newline=text.endswith("\n")
-    )
-    return text, fmt
+    def __str__(self) -> str:
+        return self.name
 
 
 # --------------------------------------------------------------------------- #
@@ -347,7 +277,10 @@ class ChartFile:
 
     @classmethod
     def parse(cls, data: bytes) -> ChartFile:
-        text, fmt = decode(data)
+        try:
+            text, fmt = decode(data)
+        except TextDecodeError as exc:
+            raise ChartFormatError(f"cannot decode chart file: {exc}") from None
         return cls(parse_nodes(text), fmt)
 
     @classmethod
@@ -369,7 +302,7 @@ class ChartFile:
             raise ChartFormatError(
                 f"chart text cannot be written as {fmt.encoding}: {exc}"
             ) from None
-        return (_bom_bytes(fmt.encoding) if fmt.bom else b"") + payload
+        return fmt.bom_bytes() + payload
 
     def write(self, path: str | Path) -> None:
         Path(path).write_bytes(self.to_bytes())
@@ -396,15 +329,13 @@ class ChartFile:
         size = _int_or_none(self.chart.get("period_size"))
         if unit is None or size is None:
             return None
-        try:
-            return Timeframe(PeriodUnit(unit), size)
-        except ValueError:
-            return None
+        return Timeframe.from_codes(unit, size)
 
     @timeframe.setter
     def timeframe(self, value: Timeframe) -> None:
-        self.chart.set("period_type", str(int(value.unit)))
-        self.chart.set("period_size", str(value.size))
+        period_type, period_size = value.codes
+        self.chart.set("period_type", str(period_type))
+        self.chart.set("period_size", str(period_size))
 
     def _expert_section(self) -> Section | None:
         # Only a <expert> directly under <chart> is the chart's expert advisor;

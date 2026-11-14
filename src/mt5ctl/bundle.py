@@ -21,12 +21,14 @@ from __future__ import annotations
 
 import hashlib
 import re
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
+from . import mt5spec
 from .chart import ChartFile
 from .errors import BundleError, ChartFormatError
+from .text import decode_lenient
 
 MQL5_DIR = "MQL5"
 EXPERTS_DIR = f"{MQL5_DIR}/Experts"
@@ -51,6 +53,21 @@ def validate_profile(name: str) -> str:
 def charts_dir(profile: str) -> str:
     """Relative path of a profile's chart folder, e.g. ``MQL5/Profiles/Charts/Default``."""
     return f"{CHARTS_ROOT}/{validate_profile(profile)}"
+
+
+def order_relpath(profile: str) -> str:
+    """Relative path of a profile's window-order file (:data:`mt5spec.PROFILE_ORDER_FILE`)."""
+    return f"{charts_dir(profile)}/{mt5spec.PROFILE_ORDER_FILE}"
+
+
+def parse_order(data: bytes) -> tuple[str, ...]:
+    """Chart file names listed in an order file, in order."""
+    return tuple(line.strip() for line in decode_lenient(data).splitlines() if line.strip())
+
+
+def render_order(names: Iterable[str]) -> bytes:
+    """An order file as the terminal writes it: UTF-16LE, BOM, CRLF after each name."""
+    return b"\xff\xfe" + "".join(f"{n}\r\n" for n in names).encode("utf-16-le")
 
 
 def is_chart(relpath: str) -> bool:

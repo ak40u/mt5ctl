@@ -32,10 +32,20 @@ terminals:
   vps-live:
     host: vps
     data_dir: /home/trader/mt5/live
-    profile: Default        # chart profile under MQL5/Profiles/Charts (default: Default)
-    env: live               # changing a live terminal requires explicit confirmation
+    service: mt5-live.service   # systemd unit; needed by deploy, status and restart
+    service_scope: system       # system: sudo -n systemctl; user: systemctl --user
+    profile: Default            # chart profile under MQL5/Profiles/Charts (default: Default)
+    env: live                   # changing a live terminal requires --confirm-live
 
   farm-demo1:
     host: farm
     data_dir: /home/trader/mt5/demo1
+    service: mt5-demo1.service
     env: demo
+
+  # A never-started copy of an installation, used only by `mt5ctl compile`.
+  farm-build:
+    host: farm
+    data_dir: /home/trader/mt5/build
+    wineprefix: /home/trader/.wine-mt5
+    display: ":99"

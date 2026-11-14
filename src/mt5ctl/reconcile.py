@@ -24,6 +24,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
+from . import mt5spec
 from .bundle import Bundle, is_chart
 from .errors import ManifestError
 from .manifest import Manifest
@@ -43,12 +44,15 @@ class TerminalState:
         unresolved_charts: live charts that run an expert whose path could not
             be resolved (or that failed to parse) — the fail-safe input for
             expert removal.
+        order: the chart names in the profile's order file, ``None`` when the
+            file is absent.
     """
 
     manifest: Manifest | None = None
     files: Mapping[str, str | None] = field(default_factory=dict)
     charts: Mapping[str, str | None] = field(default_factory=dict)
     unresolved_charts: frozenset[str] = frozenset()
+    order: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +68,9 @@ class DeployPlan:
     foreign: tuple[str, ...] = ()
     conflicts: tuple[str, ...] = ()
     notes: tuple[str, ...] = ()
+    order: tuple[str, ...] | None = None
+    """The profile's new window order, when the deploy changes it; written along
+    with the other changes (it never causes a deploy on its own)."""
 
     @property
     def has_changes(self) -> bool:
@@ -143,6 +150,10 @@ def compute_plan(bundle: Bundle, state: TerminalState) -> DeployPlan:
             remove.append(path)
 
     foreign = sorted(c for c in state.charts if c not in bundle_charts and c not in managed)
+    gap_note = _numbering_gap_note([*bundle_charts, *foreign])
+    if gap_note:
+        notes.append(gap_note)
+    order = _next_order(state, [*bundle_charts, *foreign])
     return DeployPlan(
         add=tuple(add),
         update=tuple(update),
@@ -152,4 +163,48 @@ def compute_plan(bundle: Bundle, state: TerminalState) -> DeployPlan:
         foreign=tuple(foreign),
         conflicts=tuple(conflicts),
         notes=tuple(notes),
+        order=order,
     )
+
+
+def _numbering_gap_note(charts: list[str]) -> str | None:
+    """Warn when the profile after the deploy would have gaps in chart numbers.
+
+    See :data:`mt5ctl.mt5spec.CHARTS_CONTIGUOUS`: a terminal that closes gaps
+    when it saves the profile would shift the later charts onto other file
+    names, and the next plan would see them as changed.
+    """
+    if not mt5spec.CHARTS_CONTIGUOUS:
+        return None
+    numbers = sorted(
+        int(m.group(1))
+        for c in charts
+        if (m := mt5spec.CHART_FILE_RE.fullmatch(c.rsplit("/", 1)[-1])) is not None
+    )
+    if not numbers or numbers == list(range(1, len(numbers) + 1)):
+        return None
+    missing = sorted(set(range(1, numbers[-1] + 1)) - set(numbers))
+    shown = ", ".join(f"chart{n:02d}" for n in missing[:5]) + (
+        " ..." if len(missing) > 5 else ""
+    )
+    return (
+        f"chart numbering will have gaps ({shown} missing); number bundle charts so that "
+        "together with foreign charts they run chart01, chart02, ... without holes"
+    )
+
+
+def _next_order(state: TerminalState, charts_after: list[str]) -> tuple[str, ...] | None:
+    """The order file's names after the deploy, or ``None`` if it stays as it is.
+
+    Names of charts that will no longer exist are dropped, every chart that will
+    exist and is not listed is appended in file-name order, and everything else
+    keeps its place.
+    """
+    names_after = {c.rsplit("/", 1)[-1] for c in charts_after}
+    if state.order is None and not names_after:
+        return None
+    current = state.order or ()
+    kept = [n for n in current if n in names_after]
+    added = sorted(n for n in names_after if n not in kept)
+    new = tuple(kept + added)
+    return None if new == current and state.order is not None else new

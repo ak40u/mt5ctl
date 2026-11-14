@@ -23,10 +23,13 @@ import yaml
 
 from .bundle import DEFAULT_PROFILE, validate_profile
 from .errors import BundleError, ConfigError
-from .models import Env, Host, HostKind, Registry, Terminal
+from .models import Env, Host, HostKind, Registry, ServiceScope, Terminal
 
 # Ids end up in file names, messages and scripts: keep them boring.
 _ID_RE = re.compile(r"[A-Za-z0-9._-]+")
+# systemd unit names (instance units included) and X display names.
+_UNIT_RE = re.compile(r"[A-Za-z0-9@._:-]+")
+_DISPLAY_RE = re.compile(r":[0-9]+(\.[0-9]+)?")
 
 
 def candidate_paths() -> list[Path]:
@@ -127,12 +130,29 @@ def _build_terminal(term_id: str, raw: dict[str, Any], hosts: dict[str, Host]) -
         validate_profile(profile)
     except BundleError as exc:
         raise ConfigError(f"{where}: {exc}") from None
+    service = raw.get("service")
+    if service is not None and not _UNIT_RE.fullmatch(str(service)):
+        raise ConfigError(f"{where}: service {service!r} is not a systemd unit name")
+    try:
+        scope = ServiceScope(raw.get("service_scope", "system"))
+    except ValueError:
+        raise ConfigError(
+            f"{where}: invalid service_scope {raw.get('service_scope')!r} (use system or user)"
+        ) from None
+    display = raw.get("display")
+    if display is not None and not _DISPLAY_RE.fullmatch(str(display)):
+        raise ConfigError(f"{where}: display {display!r} must look like ':99'")
+    wineprefix = raw.get("wineprefix")
     return Terminal(
         id=term_id,
         host=host_id,
         data_dir=_plain(_required(raw, "data_dir", where), "data_dir", where),
         profile=profile,
         env=env,
+        service=str(service) if service is not None else None,
+        service_scope=scope,
+        wineprefix=_plain(str(wineprefix), "wineprefix", where) if wineprefix else None,
+        display=str(display) if display is not None else None,
     )
 
 

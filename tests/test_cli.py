@@ -8,9 +8,10 @@ from pathlib import Path
 import pytest
 
 from builders import CHART1, CHARTS, EXPERT, chart_bytes, write_manifest, write_tree
+from conftest import UNIT, Farm
 from mt5ctl import __version__
 from mt5ctl.bundle import read_bundle
-from mt5ctl.cli import EXIT_BLOCKED, EXIT_ERROR, EXIT_OK, main
+from mt5ctl.cli import EXIT_BLOCKED, EXIT_ERROR, EXIT_OK, EXIT_UNHEALTHY, main
 
 
 @pytest.fixture
@@ -46,10 +47,10 @@ def test_chart_show(capsys: pytest.CaptureFixture[str]) -> None:
 
 
 def test_chart_show_json(capsys: pytest.CaptureFixture[str]) -> None:
-    assert main(["chart", "show", "--json", str(CHARTS / "no-expert-utf16.chr")]) == EXIT_OK
+    assert main(["chart", "show", "--json", str(CHARTS / "terminal-d1.chr")]) == EXIT_OK
     payload = json.loads(capsys.readouterr().out)
     assert payload["expert"] is None
-    assert payload["timeframe"] == "H4"
+    assert payload["timeframe"] == "D1"
 
 
 def test_chart_show_bad_file(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -127,3 +128,88 @@ def test_list(setup: tuple[Path, Path, Path], capsys: pytest.CaptureFixture[str]
     assert str(data) in out
     assert main(["list", "--config", str(config), "--json"]) == EXIT_OK
     assert json.loads(capsys.readouterr().out)[0]["terminal"] == "demo1"
+
+
+# -- lifecycle commands against the fake farm ------------------------------- #
+
+
+@pytest.fixture
+def farm_config(farm: Farm, tmp_path: Path) -> Path:
+    config = tmp_path / "farm.yaml"
+    config.write_text(
+        "hosts:\n  here: {kind: local}\n"
+        "terminals:\n"
+        f"  demo1:\n    host: here\n    data_dir: '{farm.data}'\n"
+        f"    service: {UNIT}\n    service_scope: user\n"
+        f"  live1:\n    host: here\n    data_dir: '{farm.data}'\n"
+        f"    service: {UNIT}\n    service_scope: user\n    env: live\n"
+    )
+    return config
+
+
+def test_deploy_status_restart_verify(
+    farm: Farm, farm_config: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    bundle = write_tree(
+        tmp_path / "b", charts={"chart01.chr": chart_bytes()}, experts={EXPERT: b"v1"}
+    )
+    farm.journal_on_start("Trend")
+    cfg = ["--config", str(farm_config)]
+    assert main(["deploy", "demo1", str(bundle), *cfg, "--verify-timeout", "2"]) == EXIT_OK
+    out = capsys.readouterr().out
+    assert "restarted" in out and "verify: healthy" in out
+
+    assert main(["status", "demo1", *cfg]) == EXIT_OK
+    assert "connected" in capsys.readouterr().out
+
+    assert main(["restart", "demo1", *cfg, "--verify-timeout", "2", "--json"]) == EXIT_OK
+    assert json.loads(capsys.readouterr().out)["verify"]["healthy"] is True
+
+    assert main(["verify", "demo1", *cfg]) == EXIT_OK
+    assert "healthy" in capsys.readouterr().out
+
+
+def test_unhealthy_deploy_exits_3(
+    farm: Farm, farm_config: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    bundle = write_tree(
+        tmp_path / "b", charts={"chart01.chr": chart_bytes()}, experts={EXPERT: b"1"}
+    )
+    farm.journal_on_start(authorized=False)
+    code = main(
+        ["deploy", "demo1", str(bundle), "--config", str(farm_config), "--verify-timeout", "0"]
+    )
+    assert code == EXIT_UNHEALTHY
+    assert "not loaded yet: Trend" in capsys.readouterr().out
+
+
+def test_live_needs_the_flag(
+    farm: Farm, farm_config: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    bundle = write_tree(tmp_path / "b", experts={EXPERT: b"1"})
+    assert main(["deploy", "live1", str(bundle), "--config", str(farm_config)]) == EXIT_ERROR
+    assert "--confirm-live" in capsys.readouterr().err
+    assert farm.calls == []
+
+
+def test_adopt_and_compile_commands(
+    farm: Farm, farm_config: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    write_tree(farm.data, charts={"chart01.chr": chart_bytes()}, experts={EXPERT: b"1"})
+    bundle = write_tree(
+        tmp_path / "b", charts={"chart01.chr": chart_bytes()}, experts={EXPERT: b"1"}
+    )
+    assert main(["adopt", "demo1", str(bundle), "--config", str(farm_config)]) == EXIT_OK
+    assert "adopted 2 files on demo1" in capsys.readouterr().out
+
+    (farm.data / "metaeditor64.exe").write_bytes(b"MZ")
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "A.mq5").write_text("// ok")
+    (src / "B.mq5").write_text("#error no")
+    out_dir = tmp_path / "out"
+    code = main(["compile", "demo1", str(src), str(out_dir), "--config", str(farm_config)])
+    assert code == EXIT_ERROR
+    out = capsys.readouterr().out
+    assert "ok     A.mq5" in out and "FAILED B.mq5" in out
+    assert (out_dir / "A.ex5").exists()

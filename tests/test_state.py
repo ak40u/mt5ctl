@@ -13,16 +13,16 @@ from pathlib import Path
 
 import pytest
 
-from builders import CHART1, CHART2, EXPERT, chart_bytes, write_manifest, write_tree
+from builders import CHART1, CHART2, EXPERT, FIXTURES, chart_bytes, write_manifest, write_tree
 from mt5ctl.errors import ManifestError, StateError
 from mt5ctl.manifest import Manifest
 from mt5ctl.reconcile import TerminalState
+from mt5ctl.scripts import sh_quote
 from mt5ctl.state import (
     assemble_state,
     build_state_script,
     parse_state_output,
     read_local_state,
-    sh_quote,
 )
 
 bash = shutil.which("bash")
@@ -52,6 +52,9 @@ def terminal(root: Path) -> Path:
         experts={EXPERT: b"ex5", "MQL5/Experts/Tools/Watchdog.ex5": b"wd"},
     )
     write_manifest(root, {CHART1: "chart:x", EXPERT: "sha256:y"})
+    (root / "MQL5/Profiles/Charts/Default/order.wnd").write_bytes(
+        (FIXTURES / "profile/order.wnd").read_bytes()
+    )
     return root
 
 
@@ -70,6 +73,7 @@ def test_local_state(tmp_path: Path) -> None:
         "MQL5/Profiles/Charts/Default/chart04.chr": None,
     }
     assert st.unresolved_charts == {"MQL5/Profiles/Charts/Default/chart04.chr"}
+    assert st.order == ("chart04.chr", "chart03.chr", "chart02.chr", "chart01.chr")
 
 
 def test_local_state_of_an_empty_terminal(tmp_path: Path) -> None:

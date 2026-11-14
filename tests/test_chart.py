@@ -11,7 +11,6 @@ from mt5ctl.chart import (
     ChartFile,
     Entry,
     Expert,
-    PeriodUnit,
     Section,
     Text,
     Timeframe,
@@ -50,9 +49,9 @@ def test_decode_detects_newline_and_final_newline() -> None:
     assert (lf.newline, lf.final_newline) == ("\n", False)
 
 
-def test_decode_rejects_broken_utf16() -> None:
+def test_parse_rejects_broken_utf16() -> None:
     with pytest.raises(ChartFormatError, match="utf-16-le"):
-        decode(b"\xff\xfe<\x00c")  # odd byte count after the BOM
+        ChartFile.parse(b"\xff\xfe<\x00c")  # odd byte count after the BOM
 
 
 # -- round trip -------------------------------------------------------------- #
@@ -123,7 +122,7 @@ def test_read_names_the_file_in_errors(tmp_path: Path) -> None:
 def test_fixture_expert_view() -> None:
     chart = ChartFile.read(CHARTS / "expert-utf16.chr")
     assert chart.symbol == "EURUSD"
-    assert chart.timeframe == Timeframe(PeriodUnit.HOUR, 4)
+    assert chart.timeframe == Timeframe("H4")
     expert = chart.expert
     assert expert is not None
     assert expert.name == "Trend EURUSD H4"
@@ -137,7 +136,7 @@ def test_fixture_expert_view() -> None:
 
 
 def test_chart_without_expert() -> None:
-    chart = ChartFile.read(CHARTS / "no-expert-utf16.chr")
+    chart = ChartFile.read(CHARTS / "terminal-h1.chr")
     assert chart.expert is None
     assert chart.remove_expert() is False
 
@@ -158,24 +157,34 @@ def test_invalid_timeframe_combination_reads_as_none() -> None:
 
 
 @pytest.mark.parametrize(
-    ("name", "unit", "size"),
+    ("name", "codes"),
     [
-        ("M1", PeriodUnit.MINUTE, 1),
-        ("M15", PeriodUnit.MINUTE, 15),
-        ("H1", PeriodUnit.HOUR, 1),
-        ("h4", PeriodUnit.HOUR, 4),
-        ("D1", PeriodUnit.DAY, 1),
-        ("W1", PeriodUnit.WEEK, 1),
-        ("MN1", PeriodUnit.MONTH, 1),
+        ("M1", (0, 1)),
+        ("M15", (0, 15)),
+        ("m30", (0, 30)),
+        ("H1", (1, 1)),
+        ("h4", (1, 4)),
+        ("D1", (1, 24)),
     ],
 )
-def test_timeframe_parse_and_str(name: str, unit: PeriodUnit, size: int) -> None:
+def test_timeframe_codes(name: str, codes: tuple[int, int]) -> None:
     tf = Timeframe.parse(name)
-    assert (tf.unit, tf.size) == (unit, size)
+    assert tf.codes == codes
     assert str(tf) == name.upper()
+    assert Timeframe.from_codes(*codes) == tf
 
 
-@pytest.mark.parametrize("name", ["H5", "M7", "D2", "X1", "", "4H"])
+def test_timeframes_of_real_terminal_charts() -> None:
+    assert str(ChartFile.read(CHARTS / "terminal-h1.chr").timeframe) == "H1"
+    assert str(ChartFile.read(CHARTS / "terminal-d1.chr").timeframe) == "D1"
+
+
+@pytest.mark.parametrize("codes", [(2, 1), (3, 1), (4, 1), (1, 5), (0, 7)])
+def test_unobserved_codes_read_as_none(codes: tuple[int, int]) -> None:
+    assert Timeframe.from_codes(*codes) is None
+
+
+@pytest.mark.parametrize("name", ["H5", "M7", "D2", "W1", "MN1", "X1", "", "4H"])
 def test_timeframe_rejects_unknown(name: str) -> None:
     with pytest.raises(ValueError):
         Timeframe.parse(name)
@@ -240,7 +249,7 @@ def test_set_expert_without_mode_keeps_existing_mode() -> None:
 
 
 def test_set_expert_inserts_before_first_window() -> None:
-    chart = ChartFile.read(CHARTS / "no-expert-utf16.chr")
+    chart = ChartFile.read(CHARTS / "terminal-h1.chr")
     chart.set_expert(Expert(name="X", path=r"Experts\X.ex5", mode=1, inputs=(("A", "1"),)))
     tags = [c.tag for c in chart.chart.children if isinstance(c, Section)]
     assert tags[0] == "expert"

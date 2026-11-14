@@ -19,7 +19,8 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from .errors import ManifestError
+from .bundle import validate_member, validate_profile
+from .errors import BundleError, ManifestError
 
 MANIFEST_VERSION = 1
 STATE_DIR = ".mt5ctl"
@@ -64,4 +65,14 @@ def parse_manifest(raw: str | None) -> Manifest | None:
         raise ManifestError("deployed.json is corrupt (profile or files has the wrong type)")
     if not all(isinstance(k, str) and isinstance(v, str) for k, v in files.items()):
         raise ManifestError("deployed.json is corrupt (files is not a path -> digest map)")
+    # Every path is checked against the managed layout: a deploy removes managed
+    # paths, so an entry like "../x" must never reach a remove or chown.
+    try:
+        validate_profile(profile)
+        for path in files:
+            validate_member(path, profile)
+    except BundleError as exc:
+        raise ManifestError(
+            f"deployed.json lists a path outside the managed layout: {exc}"
+        ) from None
     return Manifest(profile=profile, files=files)
