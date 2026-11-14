@@ -213,3 +213,13 @@ def test_adopt_and_compile_commands(
     out = capsys.readouterr().out
     assert "ok     A.mq5" in out and "FAILED B.mq5" in out
     assert (out_dir / "A.ex5").exists()
+
+
+@pytest.mark.parametrize(
+    ("seconds", "text"),
+    [(0, "0s"), (59, "59s"), (60, "1m"), (3599, "59m"), (3660, "1h01m"), (90061, "1d01h")],
+)
+def test_duration(seconds: int, text: str) -> None:
+    from mt5ctl.formatting import duration
+
+    assert duration(seconds) == text

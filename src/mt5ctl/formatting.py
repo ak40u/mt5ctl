@@ -95,6 +95,20 @@ def adopt_lines(result: AdoptResult) -> list[str]:
     return lines
 
 
+def duration(seconds: int) -> str:
+    """Compact human duration: ``45s``, ``12m``, ``3h05m``, ``2d04h``."""
+    if seconds < 60:
+        return f"{seconds}s"
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes}m"
+    hours, minutes = divmod(minutes, 60)
+    if hours < 24:
+        return f"{hours}h{minutes:02d}m"
+    days, hours = divmod(hours, 24)
+    return f"{days}d{hours:02d}h"
+
+
 def status_lines(rows: list[TerminalStatus]) -> list[str]:
     conn = {True: "connected", False: "DISCONNECTED", None: "unknown"}
     out = []
@@ -102,9 +116,11 @@ def status_lines(rows: list[TerminalStatus]) -> list[str]:
         if st.error:
             out.append(f"{st.terminal:<14} ERROR {st.error}")
             continue
-        uptime = f"up {st.active_seconds}s" if st.active_seconds is not None else "up ?"
+        uptime = (
+            f"up {duration(st.active_seconds)}" if st.active_seconds is not None else "up ?"
+        )
         age = (
-            f"journal {st.journal_age_seconds}s ago"
+            f"journal {duration(st.journal_age_seconds)} ago"
             if st.journal_age_seconds is not None
             else "no journal"
         )
