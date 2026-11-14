@@ -7,9 +7,10 @@
 Describe what a terminal should run as a folder of charts and compiled experts.
 mt5ctl shows exactly what would change, applies it with a backup and automatic
 restore, and touches nothing it did not put there. Built for headless terminals
-under Wine and systemd on Linux and WSL2 — from a terminal session or from an AI
-agent over MCP.
+under Wine and systemd on Linux and WSL2 — driven from a shell or by an AI agent
+over MCP.
 
+[![CI](https://github.com/ak40u/mt5ctl/actions/workflows/ci.yml/badge.svg)](https://github.com/ak40u/mt5ctl/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
@@ -17,113 +18,207 @@ agent over MCP.
 
 ---
 
-> **Status: pre-release.** The commands below work end to end against the test
-> suite's simulated terminal. Chart-file details that MetaQuotes does not document
-> (see [docs/chart-format.md](docs/chart-format.md)) are collected in one module,
-> [`mt5spec.py`](src/mt5ctl/mt5spec.py), and are being checked against real
-> terminal builds before the first release.
+> **Pre-release.** Every command works end to end in the test suite, which runs
+> the real shell scripts against a simulated terminal, and the file formats are
+> checked against files saved by MetaTrader 5 build 6320. A few details MetaQuotes
+> does not document are still assumptions; they are listed under
+> [Limitations](#limitations). Try it on a demo terminal first.
 
 ## Why
 
 A portfolio of systematic strategies on MetaTrader 5 means dozens of charts per
-terminal, each with one expert advisor and its inputs. Keeping that in sync by
-hand — attach, set inputs, repeat on every terminal, remember which chart was
-yours and which belongs to a watchdog — does not scale, and one stray click on a
-live account is expensive.
+terminal, each running one expert advisor with its own inputs. Keeping that in
+sync by hand — attach, set inputs, repeat on every terminal, remember which chart
+was yours and which belongs to a watchdog — does not scale, and one stray click
+on a live account is expensive.
 
 mt5ctl treats a terminal like a deploy target:
 
-- **A bundle is the desired state.** A folder that mirrors the terminal's data
-  folder: chart files plus the `.ex5` experts they run.
-- **A plan before every change.** `mt5ctl plan` diffs the bundle against the
-  terminal and lists what would be added, updated and removed. It never writes.
-- **Managed subset only.** mt5ctl records what it placed in
-  `.mt5ctl/deployed.json` and only ever changes those files. Charts you attached
-  by hand, a watchdog, a trade copier — all reported as *foreign* and left alone.
+- **A bundle is the desired state.** A folder laid out like the terminal's data
+  folder: chart files, plus the `.ex5` experts they run.
+- **A plan before every change.** `mt5ctl plan` lists what a deploy would add,
+  update and remove. It never writes anything.
+- **Managed subset only.** mt5ctl records what it placed and only ever changes
+  those files. Charts you attached by hand, a watchdog, a trade copier are
+  reported as *foreign* and left alone.
 - **Compares what trades, not bytes.** The terminal keeps saving display state
-  (scroll position, scale, window size) into chart files. mt5ctl compares a
-  chart's symbol, timeframe, expert, expert mode and inputs, so scrolling a chart
-  or restarting the terminal never shows up as a change.
-- **Safe apply.** Stop the terminal, wait until its process has really exited,
-  re-plan on the quiet files, back up, apply, start, verify. A failed apply is
-  restored from the backup before the terminal starts again; a live account needs
-  explicit confirmation.
-- **Lossless chart editing.** Charts are read and written back byte for byte —
-  UTF-16 and CRLF as the terminal writes them — so changing one input never
-  disturbs the rest of the file.
-- **Agent-ready.** `mt5ctl serve` exposes the same operations as MCP tools, with
-  read-only and destructive tools marked as such.
+  (scroll position, scale, window size) into chart files. mt5ctl compares symbol,
+  timeframe, expert, expert mode and inputs, so scrolling a chart or restarting
+  the terminal never counts as a change.
+- **Careful apply.** Stop the terminal, wait until its process has exited, plan
+  again on the quiet files, back up, apply, start, and wait until every expert
+  has loaded. A failed apply is put back from the backup before the terminal
+  starts again.
+- **Lossless chart files.** Charts are read and written back byte for byte, in
+  the terminal's own UTF-16 and CRLF, so changing one input disturbs nothing else.
+
+## What a deploy touches
+
+Inside the terminal's data folder, and nowhere else:
+
+| Path | What happens |
+|---|---|
+| `MQL5/Profiles/Charts/<profile>/chartNN.chr` | the bundle's charts are placed; charts mt5ctl placed earlier and the bundle no longer has are removed |
+| `MQL5/Experts/**/*.ex5` | the same, for experts; an expert is removed only when no remaining chart runs it |
+| `MQL5/Profiles/Charts/<profile>/order.wnd` | the profile's window list is kept in step: removed charts dropped, new ones added, every other entry kept |
+| `.mt5ctl/` | mt5ctl's own state: the manifest of what it placed, the five newest backups, upload staging, the lock |
+
+On the host, it runs `systemctl stop` and `systemctl start` for the terminal's
+unit — only when something actually changes.
+
+It never touches other profiles, templates, presets, indicators or libraries,
+`config/` (accounts, passwords, servers), Market Watch, history, the journal, or
+anything outside the data folder. It never logs in to an account and never
+handles credentials.
+
+The other commands touch less: `adopt` writes only `.mt5ctl/deployed.json`;
+`restart` runs `systemctl restart`; `compile` works in a temporary
+`MQL5/Experts/mt5ctl-build-*` folder that it removes afterwards. `plan`,
+`status`, `verify`, `chart show` and `bundle check` only read.
 
 ## Install
 
 ```bash
-pip install git+https://github.com/ak40u/mt5ctl
+pipx install git+https://github.com/ak40u/mt5ctl     # or: pip install git+https://…
 mt5ctl --version
 ```
 
-Python 3.11 or newer on the machine you run mt5ctl from; dependencies are PyYAML
-and the MCP SDK. What the terminal hosts need is listed under
-[Supported hosts](#supported-hosts).
+Python 3.11 or newer on the machine you run mt5ctl from. What the terminal's host
+needs is listed under [Supported hosts](#supported-hosts).
 
-## Quickstart
+## Quick start: one terminal
 
-**1. Look inside a chart file** — symbol, timeframe, expert and every input:
+You need a MetaTrader 5 terminal installed in portable mode under Wine, run by a
+systemd unit, on a host you can reach with key-based SSH. An example unit file,
+including a clean-shutdown `ExecStop`, is in [docs/deploy.md](docs/deploy.md#systemd-unit).
 
-```console
-$ mt5ctl chart show "MQL5/Profiles/Charts/Default/chart01.chr"
-symbol     EURUSD
-timeframe  H4
-format     utf-16-le+bom, CRLF
-expert     Trend EURUSD H4
-path       Experts\Portfolio\Trend EURUSD H4.ex5
-mode       33
-inputs     6
-  RiskPerTrade   100.0
-  MagicNumber    1001
-  ...
+**1. Register the terminal** in `~/.config/mt5ctl/terminals.yaml`:
+
+```yaml
+hosts:
+  vps:
+    kind: ssh
+    ssh: trader@vps.example.com       # an ~/.ssh/config alias works too
+
+terminals:
+  demo1:
+    host: vps
+    data_dir: /home/trader/mt5/demo1  # the folder that contains MQL5/
+    service: mt5-demo1.service
+    env: demo
 ```
 
-**2. Validate a bundle** — every chart parses and every expert it runs is present:
+**2. Check that mt5ctl can see it:**
+
+```console
+$ mt5ctl status demo1
+demo1          demo active     connected    up 2h14m     journal 4s ago
+```
+
+**3. Make a bundle.** The quickest start is the terminal's own state: copy its
+profile and the experts its charts run, then delete the charts you do not want
+mt5ctl to manage (a watchdog, a manual chart) — they will stay foreign.
+
+```bash
+mkdir -p bundles/demo1/MQL5/Profiles/Charts bundles/demo1/MQL5/Experts
+rsync -a trader@vps.example.com:/home/trader/mt5/demo1/MQL5/Profiles/Charts/Default bundles/demo1/MQL5/Profiles/Charts/
+rsync -a trader@vps.example.com:/home/trader/mt5/demo1/MQL5/Experts/Portfolio bundles/demo1/MQL5/Experts/
+rm bundles/demo1/MQL5/Profiles/Charts/Default/chart03.chr   # the watchdog stays foreign
+```
 
 ```console
 $ mt5ctl bundle check bundles/demo1
 bundle OK: profile 'Default', 2 charts, 2 experts
   chart01.chr  ->  MQL5/Experts/Portfolio/Trend EURUSD H4.ex5
-  chart02.chr  ->  MQL5/Experts/Portfolio/Breakout GBPUSD H1.ex5
+  chart02.chr  ->  MQL5/Experts/Portfolio/Reversal USDJPY H4.ex5
 ```
 
-**3. Register your terminals** (see [Configuration](#configuration)), then plan:
+The copied `order.wnd` is ignored: mt5ctl keeps the terminal's own in step.
+
+**4. Adopt** — once, because these files are already on the terminal. It only
+records them as managed; nothing else changes and the terminal keeps running:
+
+```console
+$ mt5ctl adopt demo1 bundles/demo1
+adopted 4 files on demo1
+  foreign MQL5/Profiles/Charts/Default/chart03.chr (left unmanaged)
+manifest: /home/trader/mt5/demo1/.mt5ctl/deployed.json
+```
+
+**5. Change the bundle, plan, deploy.** Here chart02 switches from the USDJPY
+reversal strategy to a GBPUSD breakout: its chart file is replaced (written with
+the [Python API](docs/chart-format.md#editing-charts-from-python) or copied from
+another terminal) and the new `.ex5` dropped in, the old one deleted:
 
 ```console
 $ mt5ctl plan demo1 bundles/demo1
 plan for demo1 (profile 'Default'):
   + MQL5/Experts/Portfolio/Breakout GBPUSD H1.ex5
-  + MQL5/Profiles/Charts/Default/chart02.chr
-  - MQL5/Profiles/Charts/Default/chart03.chr
-  foreign MQL5/Profiles/Charts/Default/chart09.chr (not managed, left alone)
-2 to add, 0 to update, 1 to remove, 2 unchanged
-```
+  ~ MQL5/Profiles/Charts/Default/chart02.chr
+  - MQL5/Experts/Portfolio/Reversal USDJPY H4.ex5
+  foreign MQL5/Profiles/Charts/Default/chart03.chr (not managed, left alone)
+1 to add, 1 to update, 1 to remove, 2 unchanged
 
-**4. Deploy** — stop, back up, apply, start, and wait until every expert has loaded:
-
-```console
 $ mt5ctl deploy demo1 bundles/demo1
 deploy demo1:
   + MQL5/Experts/Portfolio/Breakout GBPUSD H1.ex5
-  + MQL5/Profiles/Charts/Default/chart02.chr
-  - MQL5/Profiles/Charts/Default/chart03.chr
-2 to add, 0 to update, 1 to remove, 2 unchanged
-backup: /home/trader/mt5/demo1/.mt5ctl/backups/20261115-120000-1a2b3c.tar
+  ~ MQL5/Profiles/Charts/Default/chart02.chr
+  - MQL5/Experts/Portfolio/Reversal USDJPY H4.ex5
+  foreign MQL5/Profiles/Charts/Default/chart03.chr (not managed, left alone)
+1 to add, 1 to update, 1 to remove, 2 unchanged
+backup: /home/trader/mt5/demo1/.mt5ctl/backups/20261115-120001-931e70.tar
 restarted
 verify: healthy — service active; connected; 2/2 experts loaded
 ```
 
-Running it again changes nothing and does not restart the terminal. For a
-terminal that was set up by hand, run `mt5ctl adopt demo1 bundles/demo1` once
-first: it records what the terminal already runs, so the first deploy does not
-refuse every existing file. Details: [docs/deploy.md](docs/deploy.md).
+Running the same deploy again changes nothing and does not restart the terminal:
 
-Every command takes `--json` for scripting.
+```console
+$ mt5ctl deploy demo1 bundles/demo1
+deploy demo1:
+  foreign MQL5/Profiles/Charts/Default/chart03.chr (not managed, left alone)
+0 to add, 0 to update, 0 to remove, 4 unchanged; nothing to do
+not restarted (nothing changed)
+verify: healthy — service active; connected; 2/2 experts loaded
+```
+
+For a terminal tagged `env: live`, every changing command needs `--confirm-live`.
+Every command takes `--json`.
+
+## With an AI agent (MCP)
+
+`mt5ctl serve` runs an MCP server on stdio with the same operations as tools.
+Read-only tools are marked read-only and changing tools destructive, so clients
+can ask before running them; a live terminal additionally requires
+`confirm=true`.
+
+Claude Code:
+
+```bash
+claude mcp add --scope user mt5ctl -- mt5ctl serve
+```
+
+Any other MCP client:
+
+```json
+{
+  "mcpServers": {
+    "mt5ctl": {
+      "command": "mt5ctl",
+      "args": ["serve", "--config", "/home/you/.config/mt5ctl/terminals.yaml"]
+    }
+  }
+}
+```
+
+| Tool | Changes state |
+|---|---|
+| `mt5_list`, `mt5_status`, `mt5_plan`, `mt5_verify`, `mt5_chart` | no |
+| `mt5_deploy`, `mt5_adopt`, `mt5_restart`, `mt5_compile` | yes |
+
+Then ask, for example: *"Plan deploying bundles/demo1 to demo1 and show me the
+plan"*, *"Deploy it"*, *"Is demo1 healthy?"*. If the client gives up on a deploy
+midway, the terminal is still started again and the lock released.
 
 ## Commands
 
@@ -135,17 +230,20 @@ Every command takes `--json` for scripting.
 | `plan <terminal> <bundle>` | what a deploy would change | no |
 | `status [terminal…]` | service state, broker connection, journal age | no |
 | `verify <terminal>` | service, connection, every chart's expert loaded | no |
-| `deploy <terminal> <bundle>` | apply a bundle (see above) | yes |
+| `deploy <terminal> <bundle>` | apply a bundle | yes |
 | `adopt <terminal> <bundle>` | record a bundle the terminal already runs as managed | manifest only |
 | `restart <terminal>` | restart through systemd, then verify | restarts it |
 | `compile <terminal> <src> <out>` | build `.ex5` from `.mq5` with the terminal's MetaEditor | temporary folder |
 | `serve` | run the MCP server (stdio) | — |
 
-Commands that change a terminal with `env: live` require `--confirm-live`.
+| Exit code | Meaning |
+|---|---|
+| `0` | success; for `plan`, the deploy can proceed |
+| `1` | error: bad bundle, unreachable host, corrupt manifest, failed compile… (on stderr) |
+| `2` | `plan`: a deploy would refuse, because a bundle file would overwrite a file mt5ctl does not manage |
+| `3` | the terminal is not healthy (after `deploy` or `restart`, in `verify`, in `status`) |
 
 ## Bundles
-
-A bundle is a directory laid out like a terminal's data folder:
 
 ```text
 bundles/demo1/
@@ -157,111 +255,100 @@ bundles/demo1/
     └── Breakout GBPUSD H1.ex5
 ```
 
-- Exactly one profile per bundle; it must match the terminal's `profile`.
+- One profile per bundle, matching the terminal's `profile` (default `Default`).
 - A chart's expert is found through its `path=` line (`Experts\Portfolio\…ex5`)
   and must be in the bundle.
-- A chart without an expert is allowed — useful to put a symbol into Market
+- A chart without an expert is fine — for example, to put a symbol into Market
   Watch for currency conversion.
-- Everything else in the folder (sources, notes, logs) is ignored. Symlinks,
+- Number charts so that, together with the foreign charts on the terminal, they
+  run `chart01`, `chart02`, … without gaps; `plan` warns otherwise.
+- Anything else in the folder (sources, notes, logs) is ignored. Symlinks,
   absolute paths and `..` are refused.
 
-The easiest way to make a chart file is to set the chart up once in a terminal,
-save it, and generate the rest from it with the `mt5ctl.chart` API. The format is
-described in [docs/chart-format.md](docs/chart-format.md).
+The chart format and the Python API for generating charts from a template are in
+[docs/chart-format.md](docs/chart-format.md).
 
 ## Configuration
 
-Terminals live in a YAML registry, looked up in this order: `--config PATH`,
-`$MT5CTL_CONFIG`, `~/.config/mt5ctl/terminals.yaml`, `./terminals.yaml`.
+The registry is looked up in this order: `--config PATH`, `$MT5CTL_CONFIG`,
+`~/.config/mt5ctl/terminals.yaml`, `./terminals.yaml`. Keep it private: it names
+your hosts. The full template is
+[examples/terminals.example.yaml](examples/terminals.example.yaml).
 
-```yaml
-hosts:
-  workstation:            # this machine: a Wine prefix, or Windows itself
-    kind: local
-  vps:                    # a Linux server over SSH (key-based login)
-    kind: ssh
-    ssh: trader@vps.example.com
-  farm:                   # a Windows server running terminals inside WSL2
-    kind: wsl
-    ssh: farm.example.com
-    wsl_distro: Ubuntu-24.04
-
-terminals:
-  demo1:
-    host: farm
-    data_dir: /home/trader/mt5/demo1   # the folder that contains MQL5/
-    service: mt5-demo1.service         # systemd unit; needed by deploy, status, restart
-    service_scope: system               # system (sudo -n systemctl) | user (systemctl --user)
-    profile: Default                    # optional, default "Default"
-    env: demo                           # demo | live
-```
-
-The full template is [examples/terminals.example.yaml](examples/terminals.example.yaml).
-For a terminal started with `/portable`, the data folder is the install folder.
+| Terminal field | Meaning |
+|---|---|
+| `host` | a host from `hosts:` |
+| `data_dir` | the folder containing `MQL5/`; for a `/portable` terminal, the install folder |
+| `service` | its systemd unit; needed by `deploy`, `status`, `restart` |
+| `service_scope` | `system` (default, via `sudo -n systemctl`) or `user` (`systemctl --user`) |
+| `profile` | the chart profile mt5ctl manages, default `Default` |
+| `env` | `demo` (default) or `live` |
+| `wineprefix`, `display` | for `compile`: Wine prefix and X display of MetaEditor |
 
 ### Supported hosts
 
 | Host | Read-only commands | deploy, adopt, restart, status | compile |
 |---|---|---|---|
-| Linux, Wine + systemd, over SSH (`kind: ssh`) | yes | yes | yes |
+| Linux with Wine and systemd, over SSH (`kind: ssh`) | yes | yes | yes |
 | WSL2 on a Windows server, over SSH (`kind: wsl`) | yes | yes | yes |
-| This machine, Linux or macOS with bash (`kind: local`) | yes | with systemd | with Wine |
+| This machine, Linux or macOS (`kind: local`) | yes | with systemd | with Wine |
 | This machine, Windows (`kind: local`) | `chart`, `bundle`, `plan` | no | no |
-| A remote Windows host (OpenSSH + PowerShell) | not supported yet | | |
+| A remote Windows host (OpenSSH + PowerShell) | not supported | | |
 
-Hosts need `bash`, `tar`, `base64` and `sha256sum` (or `shasum`); `ss` lets
-`status` attribute broker connections to each terminal. A system unit is
-controlled with `sudo -n systemctl`, so the SSH user needs a password-less sudo
-rule for `systemctl start|stop|restart <unit>`, or use a user unit.
+The host needs `bash`, `tar`, `base64` and `sha256sum` (or `shasum`); with `ss`,
+`status` attributes broker connections to each terminal. For a system unit, the
+SSH user needs a password-less sudo rule for `systemctl start|stop|restart` of
+that unit (mt5ctl uses `sudo -n`, which fails instead of prompting); a user unit
+needs no sudo.
 
-### MCP
+## Safety
 
-```bash
-claude mcp add --scope user mt5ctl -- mt5ctl serve --config ~/.config/mt5ctl/terminals.yaml
-```
+- **One run at a time.** Deploy, adopt and restart hold a per-terminal lock; a
+  second run refuses until the first finishes.
+- **Nothing is written while the terminal runs.** After `systemctl stop`, mt5ctl
+  waits until no terminal process is left in the unit's cgroup, then plans again
+  on the files the terminal left behind.
+- **Verified uploads.** Each file's sha256 is checked on the host before anything
+  is moved into place; the manifest is written last.
+- **Back to the previous state on failure.** A failed apply restores every touched
+  file from the backup before the terminal starts again. If even the restore
+  cannot finish, the error says so and names the backup.
+- **Always started again.** Once asked to stop, the terminal is started again
+  after an error, a dropped connection, Ctrl-C or a cancelled MCP call.
+- **Refuses rather than guesses.** A bundle file landing on a file mt5ctl does not
+  manage is a conflict and the deploy refuses. A corrupt manifest, or one listing
+  a path outside the managed folders, stops everything. If any foreign chart's
+  expert cannot be identified, no expert is removed.
+- **Live terminals need confirmation**: `--confirm-live`, or `confirm=true` over MCP.
+- **Not rolled back on a slow start.** If verify fails after a deploy, the files
+  are as intended; mt5ctl reports what has not loaded (exit code 3) instead of
+  undoing a correct deploy because the broker reconnected slowly.
+- **Shell-safe.** Scripts travel base64-encoded over SSH's stdin and every value
+  in them is single-quoted, so file names with spaces, quotes or `$` are safe.
 
-Tools: `mt5_list`, `mt5_status`, `mt5_plan`, `mt5_verify`, `mt5_chart` (read-only);
-`mt5_deploy`, `mt5_adopt`, `mt5_restart`, `mt5_compile` (change state; `confirm=true`
-for live terminals).
+## Limitations
 
-## Exit codes
+- **Unconfirmed details.** The layout of a chart's `<expert>` block and the
+  meaning of `expertmode` follow MetaTrader 4 and have not yet been checked
+  against a chart saved by MetaTrader 5; the journal lines for broker
+  authorization and failed expert loads likewise. Every such assumption is in one
+  module, [`mt5spec.py`](src/mt5ctl/mt5spec.py), each with its source.
+- **Timeframes.** Minute and hour timeframes and D1 are supported; W1 and MN1 are
+  not yet.
+- **systemd only.** Changing a terminal needs a systemd unit; there is no
+  support for terminals started some other way.
+- **No remote Windows.** Terminals on a Windows host are reachable only through
+  WSL2, or with `kind: local` for the read-only commands.
+- **Files only.** mt5ctl does not log in to accounts, change terminal settings or
+  manage Market Watch.
 
-| Code | Meaning |
-|---|---|
-| `0` | success; for `plan`, the deploy can proceed (with or without changes) |
-| `1` | error: bad bundle, unreachable host, corrupt manifest, failed compile… (message on stderr) |
-| `2` | `plan` only: a deploy would refuse — a bundle file would overwrite a file mt5ctl does not manage |
-| `3` | the terminal is not healthy: after `deploy` or `restart`, in `verify`, or in `status` |
+## Documentation
 
-## Safety model
-
-- `plan`, `status`, `verify`, `chart show` and `bundle check` are read-only,
-  locally and remotely.
-- One deploy, adopt or restart at a time per terminal: a lock in the data folder
-  refuses a second run until the first finishes.
-- A terminal that was asked to stop is always started again — after an error, a
-  dropped connection, or a cancelled MCP call.
-- Nothing is written while the terminal runs: after `systemctl stop`, mt5ctl waits
-  until no terminal process is left in the unit's cgroup.
-- A failed apply puts every touched file back from the backup before the terminal
-  starts again. A deploy whose verify fails is reported (exit code 3), not rolled
-  back: the files are as intended, and the usual cause is a slow reconnect.
-- A bundle file that would land on an existing unmanaged file is a **conflict**,
-  and a deploy refuses outright. Typical cause: your bundle's `chart05.chr`
-  collides with a chart you attached by hand. Renumber the bundle around it.
-- A managed expert dropped from the bundle is removed only when no remaining
-  chart runs it. If any foreign chart's expert cannot be resolved, no managed
-  expert is removed at all.
-- A corrupt or newer-version `deployed.json` stops everything; it is never
-  treated as empty.
-- Remote scripts are shipped base64-encoded over SSH's stdin and every embedded
-  value is shell-quoted, so file names with spaces, quotes or `$` are safe.
-
-## Roadmap
-
-- Check every assumption in `mt5spec.py` against current terminal builds.
-- Remote Windows hosts (OpenSSH + PowerShell).
-- Market Watch and symbol-set management.
+- [docs/deploy.md](docs/deploy.md): the deploy sequence step by step, adopting a
+  running terminal, the systemd unit, compiling.
+- [docs/chart-format.md](docs/chart-format.md): chart files, timeframe codes, the
+  order file, editing charts from Python.
+- [CHANGELOG.md](CHANGELOG.md), [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Development
 
@@ -269,8 +356,6 @@ for live terminals).
 python -m venv .venv && .venv/bin/pip install -e ".[dev]"
 .venv/bin/pytest && .venv/bin/ruff check src tests && .venv/bin/ruff format --check src tests && .venv/bin/mypy
 ```
-
-See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
