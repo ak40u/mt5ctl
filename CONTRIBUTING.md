@@ -25,7 +25,13 @@ CI runs all four; run them locally first:
 ## Ground rules
 
 - **Pure core, thin edges.** Parsing, planning and script generation are pure
-  functions with unit tests. Only `operations.py` and `ssh.py` touch hosts.
+  functions with unit tests. Only `operations.py` and `transport.py` touch hosts.
+- **Undocumented terminal behaviour lives in `mt5spec.py`.** File encodings,
+  period codes, journal lines, MetaEditor output: if MetaQuotes does not
+  document it, it goes there with its source, and nowhere else.
+- **Test against real bash.** A `local` host runs exactly the command an SSH
+  host runs, so deploy, adopt, restart and compile are tested end to end with
+  only `systemctl` and `wine` replaced (`tests/fakes/`).
 - **One parser.** Remote scripts ship raw bytes back; all parsing happens in
   Python with the same code that reads bundles. Do not parse chart files in
   shell.

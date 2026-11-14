@@ -9,12 +9,15 @@ command line.
 MetaQuotes does not publish the `.chr` format. This page describes how mt5ctl
 reads it and which parts it relies on. The parser is deliberately generic: it
 understands sections and `key=value` lines, keeps everything else as it is, and
-gives a typed view only of the few keys a deploy needs.
+gives a typed view only of the few keys a deploy needs. Every assumption about
+undocumented behaviour (encodings, period codes, journal lines) lives in
+[`mt5spec.py`](../src/mt5ctl/mt5spec.py), with its source.
 
 ## Encoding
 
 The terminal writes chart files as UTF-16LE with a byte-order mark and CRLF line
-endings. mt5ctl also reads UTF-8 (with or without BOM), BOM-less UTF-16LE and
+endings, with no line break after the closing `</chart>` (observed on build
+6320). mt5ctl also reads UTF-8 (with or without BOM), BOM-less UTF-16LE and
 Windows-1252, and writes a file back in the encoding, BOM, line ending and final
 newline it was read with. A file that is parsed and written back unchanged is
 byte-identical to the original.
@@ -60,11 +63,27 @@ name=Main
 | Key | Where | Meaning |
 |---|---|---|
 | `symbol` | `<chart>` | the chart's symbol |
-| `period_type`, `period_size` | `<chart>` | the timeframe: `period_size` counts in units of `period_type` (0 minutes, 1 hours, 2 days, 3 weeks, 4 months), so `1`/`4` is H4 and `0`/`15` is M15 |
+| `period_type`, `period_size` | `<chart>` | the timeframe: `period_size` counts minutes (`period_type=0`) or hours (`1`); see the table below |
 | `name` | `<expert>` | the expert's display name |
 | `path` | `<expert>` | the expert's file, relative to `MQL5`, with backslashes |
 | `expertmode` | `<expert>` | the expert's permission flags, kept as a number |
 | everything | `<inputs>` inside `<expert>` | the expert's inputs, in order, values exactly as stored |
+
+Timeframe codes observed on build 6320:
+
+| Timeframe | `period_type` | `period_size` |
+|---|---|---|
+| M30 | 0 | 30 |
+| H1 | 1 | 1 |
+| H4 | 1 | 4 |
+| D1 | 1 | 24 |
+
+The other minute and hour timeframes follow the same scheme. W1 and MN1 have
+not been observed yet, so mt5ctl does not read or write them.
+
+The layout of the `<expert>` block (`name`, `path`, `expertmode`, `<inputs>`)
+follows the MetaTrader 4 chart format; `expertmode` is kept as a number and not
+interpreted.
 
 Only the `<expert>` section directly inside `<chart>` is the chart's expert
 advisor. Indicators carry their own `<inputs>` inside `<window>` blocks; mt5ctl
@@ -103,3 +122,10 @@ would change the file's structure.
 
 Each chart's `id=` should be unique within a profile; when you generate charts
 from one template, give each a fresh value.
+
+## The order file
+
+Next to the charts, each profile folder holds `order.wnd`: the chart file names,
+one per line, in window order (UTF-16LE with BOM, CRLF after every line). A
+deploy keeps it in step with the profile: names of charts it removes are
+dropped, charts it adds are appended, and every other entry keeps its place.
