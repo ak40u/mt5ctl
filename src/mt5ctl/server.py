@@ -26,7 +26,9 @@ from .models import Registry
 
 INSTRUCTIONS = """\
 Deploy and inspect expert advisors on MetaTrader 5 terminals (Wine on Linux/WSL2).
-Read-only: mt5_list (terminal ids), mt5_status, mt5_plan (what a deploy would change),
+Read-only: mt5_list (terminal ids), mt5_status, mt5_info (build, account, server),
+mt5_ea_list (charts and experts), mt5_autotrading, mt5_logs, mt5_screenshot (see the
+terminal's screen), mt5_doctor (setup checks), mt5_plan (what a deploy would change),
 mt5_verify, mt5_chart (read a local .chr file).
 Changing, and refused for a terminal with env=live unless confirm=true:
 mt5_deploy (apply a local bundle: stop, back up, apply, start, verify),

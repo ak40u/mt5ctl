@@ -492,13 +492,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     logs.set_defaults(func=_cmd_logs)
 
-    restart = with_verify(with_live(terminal_command("restart", "restart through systemd")))
+    restart = with_verify(
+        with_live(terminal_command("restart", "restart the terminal, then verify"))
+    )
     restart.set_defaults(func=_cmd_restart)
 
-    start = with_verify(with_live(terminal_command("start", "start through systemd")))
+    start = with_verify(
+        with_live(terminal_command("start", "start the terminal, then verify"))
+    )
     start.set_defaults(func=_cmd_start)
 
-    stop = with_live(terminal_command("stop", "stop through systemd and wait for the exit"))
+    stop = with_live(terminal_command("stop", "stop the terminal and wait for its exit"))
     stop.set_defaults(func=_cmd_stop)
 
     verify = terminal_command("verify", "check service, connection and loaded experts")

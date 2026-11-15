@@ -241,8 +241,8 @@ midway, the terminal is still started again and the lock released.
 | `logs <terminal> [-n N] [--grep RE] [--experts]` | the end of the newest journal, or of the experts' log (`Print` output) | no |
 | `deploy <terminal> <bundle>` | apply a bundle | yes |
 | `adopt <terminal> <bundle>` | record a bundle the terminal already runs as managed | manifest only |
-| `start <terminal>` / `stop <terminal>` | start or stop through systemd; `stop` says whether the terminal closed itself | starts / stops it |
-| `restart <terminal>` | restart through systemd, then verify | restarts it |
+| `start <terminal>` / `stop <terminal>` | start or stop through systemd (or in [process mode](docs/deploy.md#without-systemd-process-mode)); `stop` says whether the terminal closed itself | starts / stops it |
+| `restart <terminal>` | restart, then verify | restarts it |
 | `compile <terminal> <src> <out>` | build `.ex5` from `.mq5` with the terminal's MetaEditor | temporary folder |
 | `login <terminal> --server S [--account N] --password-stdin` | log the terminal in once, headless; it keeps the password and logs in by itself after ([docs](docs/deploy.md#logging-in)) | restarts it |
 | `serve` | run the MCP server (stdio) | — |
@@ -379,8 +379,10 @@ needs no sudo.
 
 ## Documentation
 
+- [docs/tools.md](docs/tools.md): every command and MCP tool, what it reads or
+  changes, exit codes.
 - [docs/deploy.md](docs/deploy.md): the deploy sequence step by step, adopting a
-  running terminal, the systemd unit, compiling.
+  running terminal, the systemd unit, logging in, Algo Trading, compiling.
 - [docs/chart-format.md](docs/chart-format.md): chart files, timeframe codes, the
   order file, editing charts from Python.
 - [docs/windows.md](docs/windows.md): what managing a remote Windows host would take.
