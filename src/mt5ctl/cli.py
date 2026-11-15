@@ -322,9 +322,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     def with_live(p: argparse.ArgumentParser) -> argparse.ArgumentParser:
         p.add_argument(
+            "--confirm",
             "--confirm-live",
+            dest="confirm_live",
             action="store_true",
-            help="required for a terminal with env: live",
+            help="required to change a terminal with env: live",
         )
         return p
 

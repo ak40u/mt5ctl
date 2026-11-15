@@ -54,7 +54,7 @@ class ConfirmationRequiredError(Mt5ctlError):
         self.action = action
         super().__init__(
             f"refusing to {action} live terminal {terminal_id!r} without confirmation; "
-            "pass --confirm-live (CLI) or confirm=true (MCP)"
+            "pass --confirm (CLI) or confirm=true (MCP)"
         )
 
 

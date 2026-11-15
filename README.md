@@ -182,7 +182,7 @@ not restarted (nothing changed)
 verify: healthy — service active; connected; 2/2 experts loaded
 ```
 
-For a terminal tagged `env: live`, every changing command needs `--confirm-live`.
+For a terminal tagged `env: live`, every changing command needs `--confirm`.
 Every command takes `--json`.
 
 ## With an AI agent (MCP)
@@ -327,7 +327,7 @@ needs no sudo.
   manage is a conflict and the deploy refuses. A corrupt manifest, or one listing
   a path outside the managed folders, stops everything. If any foreign chart's
   expert cannot be identified, no expert is removed.
-- **Live terminals need confirmation**: `--confirm-live`, or `confirm=true` over MCP.
+- **Live terminals need confirmation**: `--confirm`, or `confirm=true` over MCP.
 - **A terminal that cannot trade is not healthy.** Logged in with the investor
   password, or with its Algo Trading button switched off, a terminal loads every
   expert but no order goes out; `status` and `verify` report

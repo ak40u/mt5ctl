@@ -26,8 +26,9 @@ from .models import Registry
 INSTRUCTIONS = """\
 Deploy and inspect expert advisors on MetaTrader 5 terminals (Wine on Linux/WSL2).
 Read-only: mt5_list (terminal ids), mt5_status, mt5_plan (what a deploy would change),
-mt5_verify, mt5_chart (read a local .chr file). Changing (terminals with env=live need
-confirm=true): mt5_deploy (apply a local bundle: stop, back up, apply, start, verify),
+mt5_verify, mt5_chart (read a local .chr file).
+Changing, and refused for a terminal with env=live unless confirm=true:
+mt5_deploy (apply a local bundle: stop, back up, apply, start, verify),
 mt5_adopt (record a bundle the terminal already runs, before the first deploy),
 mt5_start, mt5_stop, mt5_restart, mt5_compile.
 Always run mt5_plan before mt5_deploy and show the plan.
@@ -105,7 +106,9 @@ def build_server(config: str | None = None) -> MCPServer:
 
         Only files mt5ctl placed earlier are updated or removed; foreign charts
         stay. A failed apply is restored from the backup before the restart.
-        Nothing to change means no restart. env=live needs confirm=true.
+        Nothing to change means no restart.
+
+        A terminal with env=live is refused unless confirm=true.
         """
         result = await operations.deploy(
             tools.registry, terminal, bundle, confirm=confirm, verify_timeout=verify_timeout
@@ -119,6 +122,8 @@ def build_server(config: str | None = None) -> MCPServer:
 
         Run once before the first mt5_deploy on a terminal set up by hand;
         every bundle file must already be on the terminal.
+
+        A terminal with env=live is refused unless confirm=true.
         """
         result = await operations.adopt(tools.registry, terminal, bundle, confirm=confirm)
         return "\n".join(fmt.adopt_lines(result))
@@ -128,7 +133,10 @@ def build_server(config: str | None = None) -> MCPServer:
     async def mt5_restart(
         terminal: str, confirm: bool = False, verify_timeout: float | None = None
     ) -> str:
-        """Restart a terminal through systemd and wait until it is healthy."""
+        """Restart a terminal through systemd and wait until it is healthy.
+
+        A terminal with env=live is refused unless confirm=true.
+        """
         result = await operations.restart(
             tools.registry, terminal, confirm=confirm, verify_timeout=verify_timeout
         )
@@ -139,7 +147,10 @@ def build_server(config: str | None = None) -> MCPServer:
     async def mt5_start(
         terminal: str, confirm: bool = False, verify_timeout: float | None = None
     ) -> str:
-        """Start a terminal through systemd and wait until it is healthy."""
+        """Start a terminal through systemd and wait until it is healthy.
+
+        A terminal with env=live is refused unless confirm=true.
+        """
         result = await operations.start(
             tools.registry, terminal, confirm=confirm, verify_timeout=verify_timeout
         )
@@ -148,7 +159,10 @@ def build_server(config: str | None = None) -> MCPServer:
     @mcp.tool(annotations=CHANGES)
     @_guard
     async def mt5_stop(terminal: str, confirm: bool = False) -> str:
-        """Stop a terminal through systemd and wait until its process has exited."""
+        """Stop a terminal through systemd and wait until its process has exited.
+
+        A terminal with env=live is refused unless confirm=true.
+        """
         result = await operations.stop(tools.registry, terminal, confirm=confirm)
         return "\n".join(fmt.stop_lines(result))
 
@@ -179,8 +193,9 @@ def build_server(config: str | None = None) -> MCPServer:
     async def mt5_compile(terminal: str, sources: str, out: str, confirm: bool = False) -> str:
         """Compile a local folder of .mq5 sources with a terminal's MetaEditor.
 
-        The .ex5 files are written to the local folder *out*. Use a terminal
-        reserved for compiling; env=live needs confirm=true.
+        The .ex5 files are written to the local folder *out*.
+
+        A terminal with env=live is refused unless confirm=true.
         """
         result = await operations.compile_sources(
             tools.registry, terminal, sources, out, confirm=confirm

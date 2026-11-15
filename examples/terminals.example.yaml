@@ -35,7 +35,7 @@ terminals:
     service: mt5-live.service   # systemd unit; needed by deploy, status and restart
     service_scope: system       # system: sudo -n systemctl; user: systemctl --user
     profile: Default            # chart profile under MQL5/Profiles/Charts (default: Default)
-    env: live                   # changing a live terminal requires --confirm-live
+    env: live                   # changing a live terminal requires --confirm
 
   farm-demo1:
     host: farm

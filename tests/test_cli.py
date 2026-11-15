@@ -189,7 +189,7 @@ def test_live_needs_the_flag(
 ) -> None:
     bundle = write_tree(tmp_path / "b", experts={EXPERT: b"1"})
     assert main(["deploy", "live1", str(bundle), "--config", str(farm_config)]) == EXIT_ERROR
-    assert "--confirm-live" in capsys.readouterr().err
+    assert "--confirm" in capsys.readouterr().err
     assert farm.calls == []
 
 
