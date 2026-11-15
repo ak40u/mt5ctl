@@ -157,6 +157,24 @@ def journal_connection(text: str) -> tuple[bool | None, str | None]:
     return state, event
 
 
+def since_latest_start(text: str) -> str:
+    """The part of journal text from the terminal's latest start line on."""
+    starts = list(mt5spec.LOG_TERMINAL_STARTED_RE.finditer(text))
+    return text[starts[-1].start() :] if starts else text
+
+
+def journal_algo_trading(text: str) -> bool | None:
+    """The terminal's Algo Trading button, if it was toggled in *text*.
+
+    ``None`` when the journal says nothing: the state then is whatever the
+    start configuration set (see :data:`mt5spec.LOG_ALGO_TRADING_RE`).
+    """
+    state: bool | None = None
+    for match in mt5spec.LOG_ALGO_TRADING_RE.finditer(text):
+        state = match.group(1).lower() == "enabled"
+    return state
+
+
 def journal_trading_disabled(text: str) -> str | None:
     """Why the account cannot trade, if the journal says so after the latest login.
 
@@ -178,6 +196,7 @@ def _parse_status_line(fields: list[str], term: Terminal, host: Host) -> Termina
     process_count = _int_or_none(procs)
     journal = decode_lenient(_unb64(tail))
     journal_state, event = journal_connection(journal)
+    session = since_latest_start(journal)
     sockets = _int_or_none(estab)
     connected = (sockets > 0) if sockets is not None else journal_state
     return TerminalStatus(
@@ -191,6 +210,7 @@ def _parse_status_line(fields: list[str], term: Terminal, host: Host) -> Termina
         last_event=event,
         trading_disabled=journal_trading_disabled(journal),
         terminal_running=None if process_count is None else process_count > 0,
+        algo_trading=journal_algo_trading(session),
     )
 
 
@@ -273,8 +293,7 @@ async def _recent_journal(host: Host, term: Terminal) -> str:
         return ""
     since = JournalCursor(_previous_day(newest.name), 0)
     text = await _journal_since(host, term, since)
-    starts = list(mt5spec.LOG_TERMINAL_STARTED_RE.finditer(text))
-    return text[starts[-1].start() :] if starts else text
+    return since_latest_start(text)
 
 
 async def _journal_since(host: Host, term: Terminal, cursor: JournalCursor) -> str:
@@ -328,6 +347,9 @@ def evaluate_verify(
     failed = sorted(n for n in expected if n.lower() in failed_names)
     pending = sorted(n for n in expected if n not in ok_names and n not in failed)
     trading_disabled = journal_trading_disabled(journal) or st.trading_disabled
+    algo_trading = journal_algo_trading(since_latest_start(journal))
+    if algo_trading is None:
+        algo_trading = st.algo_trading
     started = (
         mt5spec.LOG_TERMINAL_STARTED_RE.search(journal) is not None if require_start else None
     )
@@ -337,6 +359,7 @@ def evaluate_verify(
         and started is not False
         and connected is True
         and trading_disabled is None
+        and algo_trading is not False
         and not failed
         and not pending
     )
@@ -349,6 +372,7 @@ def evaluate_verify(
         pending=tuple(pending),
         failed=tuple(failed),
         trading_disabled=trading_disabled,
+        algo_trading=algo_trading,
         started=started,
         errors=journal_errors(journal),
     )
@@ -365,7 +389,11 @@ def _settled(report: VerifyReport) -> bool:
         report.started is not False
         and report.connected is True
         and not report.pending
-        and (report.trading_disabled is not None or bool(report.failed))
+        and (
+            report.trading_disabled is not None
+            or report.algo_trading is False
+            or bool(report.failed)
+        )
     )
 
 

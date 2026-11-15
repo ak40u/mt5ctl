@@ -182,3 +182,18 @@ def test_failed_expert_lines() -> None:
     assert report.loaded == ("ProbeOpenCharts",)
     assert report.failed == ("ProbeInitFailed", "ProbeTruncated")
     assert report.pending == ("ProbeCorrupt",)  # random bytes: nothing is logged
+
+
+def test_algo_trading_toggle_lines() -> None:
+    """Real lines from switching the terminal's Algo Trading button off and on."""
+    assert operations.journal_algo_trading(JOURNAL) is True  # last: enabled
+    off = until(JOURNAL, "automated trading is disabled")
+    assert operations.journal_algo_trading(off) is False
+    st = TerminalStatus("t", "h", Env.DEMO, "active", connected=True)
+    report = operations.evaluate_verify(st, off, set())
+    assert report.algo_trading is False and not report.healthy
+    assert "ALGO TRADING OFF" in report.detail
+
+
+def test_algo_trading_unknown_without_a_toggle() -> None:
+    assert operations.journal_algo_trading("MetaTrader 5 x64 build 6320 started\n") is None

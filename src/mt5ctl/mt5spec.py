@@ -134,6 +134,13 @@ LOG_AUTHORIZED_RE = re.compile(r"authorized on (\S+)", re.IGNORECASE)
 LOG_CONNECTION_LOST_RE = re.compile(
     r"connection to .* lost|no connection|disconnected from", re.IGNORECASE
 )
+# The terminal's "Algo Trading" button. Observed (build 6320): toggling it logs
+#   Experts   automated trading is disabled   /   automated trading is enabled
+# and nothing is logged at start. Its state is kept in Config/settings.ini,
+# which is binary and not readable. `[Experts] Enabled=1` in the /config: start
+# file switches it on at every start, overriding a manual "off".
+LOG_ALGO_TRADING_RE = re.compile(r"automated trading is (enabled|disabled)", re.IGNORECASE)
+
 # The account cannot trade (investor password, or trading disabled by the
 # broker); experts load but every order is refused. The reason follows the dash.
 LOG_TRADING_DISABLED_RE = re.compile(

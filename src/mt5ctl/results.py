@@ -29,6 +29,9 @@ class TerminalStatus:
     trading_disabled: str | None = None
     """Why the account cannot trade (e.g. ``investor mode``), when the journal
     says so after the latest authorization; ``None`` otherwise."""
+    algo_trading: bool | None = None
+    """The terminal's Algo Trading button, when the journal shows it was switched
+    since the latest start; ``None`` when it was not (the start config decides)."""
     terminal_running: bool | None = None
     """Whether the terminal's own process is in the unit; ``None`` when unknown.
     ``False`` with an active unit: something (a Wine dialog, a crash at start)
@@ -43,6 +46,7 @@ class TerminalStatus:
             and self.terminal_running is not False
             and self.connected is True
             and self.trading_disabled is None
+            and self.algo_trading is not False
         )
 
 
@@ -59,6 +63,8 @@ class VerifyReport:
     failed: tuple[str, ...] = ()
     trading_disabled: str | None = None
     """Why the account cannot trade, from the journal; ``None`` when it can."""
+    algo_trading: bool | None = None
+    """The terminal's Algo Trading button, if switched since the start."""
     started: bool | None = None
     """After mt5ctl started the terminal: whether the journal shows the start.
     ``None`` when not checked (verifying a terminal that was already running)."""
@@ -76,6 +82,8 @@ class VerifyReport:
         parts.append(conn[self.connected])
         if self.trading_disabled is not None:
             parts.append(f"TRADING DISABLED ({self.trading_disabled})")
+        if self.algo_trading is False:
+            parts.append("ALGO TRADING OFF")
         total = len(self.loaded) + len(self.pending) + len(self.failed)
         if total:
             parts.append(f"{len(self.loaded)}/{total} experts loaded")

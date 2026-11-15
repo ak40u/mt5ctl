@@ -151,6 +151,8 @@ def status_lines(rows: list[TerminalStatus]) -> list[str]:
             line += "  NO TERMINAL PROCESS"
         if st.trading_disabled is not None:
             line += f"  TRADING DISABLED ({st.trading_disabled})"
+        if st.algo_trading is False:
+            line += "  ALGO TRADING OFF"
         out.append(line)
     return out
 

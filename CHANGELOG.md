@@ -40,5 +40,9 @@ All notable changes to this project are documented here. The format follows
 - `status` and `verify` report an active unit whose terminal process is not
   running, and need a confirmed broker connection for "healthy".
 - Terminals take a `wine` setting; `compile` requires it when a `wineprefix` is set.
+- `status` and `verify` report the terminal's Algo Trading button switched off.
+- W1 and MN1 timeframes; failed expert loads recognised from the journal; `plan`
+  explains a chart the terminal saved without its expert.
+- `compile` handles folders with spaces through a space-free stand-in.
 - CLI: `chart show`, `bundle check`, `plan`, `list`, `deploy`, `adopt`, `status`,
   `restart`, `verify`, `compile`, `serve`, all with `--json`.

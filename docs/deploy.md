@@ -168,6 +168,31 @@ journal: with its exit line, it closed itself; without, systemd had to end it,
 and mt5ctl prints a warning. (systemd's `Result` for the unit is no guide: it
 reads `exit-code` even after a clean exit.)
 
+## Algo Trading
+
+The terminal's **Algo Trading** button must be on for any expert to trade. Its
+state is kept in `Config/settings.ini`, which is binary, so mt5ctl cannot read
+it from disk. What is observed (build 6320):
+
+- Switching the button logs `automated trading is disabled` / `... enabled`
+  in the journal; nothing is logged at start.
+- `[Experts]` with `Enabled=1` in the `/config:` start file switches it on at
+  every start, overriding a manual "off".
+
+So the way to have it on without a GUI is that start file — the one the unit
+passes with `/config:` (the same file that logs the terminal in):
+
+```ini
+[Experts]
+Enabled=1
+```
+
+Every `deploy` and `restart` then switches it back on. `status` and `verify`
+report `ALGO TRADING OFF` (and "not healthy") when the journal shows it was
+switched off after the latest start. Each expert also has its own "Allow Algo
+Trading" (bit 0 of `expertmode` in its chart); `bundle check` warns about
+charts where that is off.
+
 ## Keeping the terminal build fixed
 
 The formats mt5ctl relies on are checked against one terminal build (see

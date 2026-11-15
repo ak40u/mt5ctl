@@ -325,9 +325,12 @@ needs no sudo.
   a path outside the managed folders, stops everything. If any foreign chart's
   expert cannot be identified, no expert is removed.
 - **Live terminals need confirmation**: `--confirm-live`, or `confirm=true` over MCP.
-- **An account that cannot trade is not healthy.** Logged in with the investor
-  password, a terminal loads every expert but refuses every order; `status` and
-  `verify` report `TRADING DISABLED (investor mode)` and exit with code 3.
+- **A terminal that cannot trade is not healthy.** Logged in with the investor
+  password, or with its Algo Trading button switched off, a terminal loads every
+  expert but no order goes out; `status` and `verify` report
+  `TRADING DISABLED (investor mode)` or `ALGO TRADING OFF` and exit with code 3.
+  `[Experts] Enabled=1` in the start config switches Algo Trading on at every
+  start ([docs/deploy.md](docs/deploy.md#algo-trading)).
 - **Not rolled back on a slow start.** If verify fails after a deploy, the files
   are as intended; mt5ctl reports what has not loaded (exit code 3) instead of
   undoing a correct deploy because the broker reconnected slowly.
