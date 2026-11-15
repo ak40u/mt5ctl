@@ -330,9 +330,11 @@ needs no sudo.
   on the files the terminal left behind.
 - **Verified uploads.** Each file's sha256 is checked on the host before anything
   is moved into place; the manifest is written last.
-- **Back to the previous state on failure.** A failed apply restores every touched
-  file from the backup before the terminal starts again. If even the restore
-  cannot finish, the error says so and names the backup.
+- **Back to the previous state on failure.** A failed apply puts every touched
+  file back from the backup before the terminal starts again, and only after
+  checking that the backup can be read. If the restore cannot finish, nothing
+  more is removed, the error says so and names the backup, and running the
+  deploy again completes it.
 - **Always started again.** Once asked to stop, the terminal is started again
   after an error, a dropped connection, Ctrl-C or a cancelled MCP call.
 - **Refuses rather than guesses.** A bundle file landing on a file mt5ctl does not

@@ -805,7 +805,11 @@ def next_manifest(bundle: Bundle, plan: DeployPlan, state: TerminalState) -> Man
 class _ApplyOutcome:
     backup: str | None
     error: RemoteCommandError | None = None
-    restored: bool = True
+    restore: str = "done"
+    """What the restore found: ``untouched`` (nothing had been moved),
+    ``applied`` (the apply finished, only its answer was lost), ``done``,
+    ``failed``, ``busy`` or ``lost``; see :func:`scripts.build_restore_script`."""
+    restore_detail: str = ""
 
 
 async def deploy(
@@ -881,17 +885,8 @@ async def deploy(
                     cursor = await _journal_cursor(host, term)
                     await _control(host, term, "start")
 
-        if outcome is not None and outcome.error is not None:
-            if outcome.restored:
-                raise DeployError(
-                    f"apply failed ({outcome.error}); {term.id} was restored to its previous "
-                    "files and started again"
-                )
-            raise DeployError(
-                f"apply failed ({outcome.error}) and the restore did not complete; {term.id} "
-                "was started on partly applied files. Run the deploy again, or unpack the "
-                f"backup {outcome.backup or '(none: first deploy)'} into the data folder"
-            )
+        if outcome is not None and outcome.error is not None and outcome.restore != "applied":
+            raise DeployError(_apply_failure(term, outcome))
         report = await _verify(
             registry,
             term,
@@ -928,13 +923,20 @@ async def _apply(
         scripts.build_backup_script(term.data_dir, [*managed, order_file], _timestamp()),
     )
     tokens = [f[0] for f in _lines(result.stdout, "BACKUP") if f]
-    backup = tokens[0] if tokens and tokens[0] != "none" else None
+    backup = (
+        _unb64(tokens[0]).decode("utf-8", "surrogateescape")
+        if tokens and tokens[0] != "none"
+        else None
+    )
 
     place = sorted({*plan.add, *plan.update})
     generated = {order_file: render_order(plan.order)} if plan.order is not None else {}
     staging = f"{scripts.STAGING_DIR}/{uuid.uuid4().hex}"
     tar_bytes, shas = build_upload(bundle, place, generated)
     manifest = next_manifest(bundle, plan, state)
+    manifest_json = manifest.to_json()
+    previous = state.manifest.files if state.manifest else {}
+    interim = Manifest(profile=bundle.profile, files={**previous, **manifest.files})
     try:
         await transport.put_tar(host, tar_bytes, f"{term.data_dir}/{staging}")
         await transport.run(
@@ -944,21 +946,59 @@ async def _apply(
                 staging,
                 shas,
                 plan.remove,
-                manifest.to_json(),
+                manifest_json,
                 unit_user,
                 holder,
+                interim_manifest_json=interim.to_json(),
             ),
         )
     except RemoteCommandError as exc:
         touched = sorted({*plan.add, *plan.update, *plan.remove, *generated})
-        restore = scripts.build_restore_script(term.data_dir, backup, touched, unit_user)
+        restore = scripts.build_restore_script(
+            term.data_dir,
+            backup,
+            touched,
+            unit_user,
+            new_manifest_sha=hashlib.sha256(manifest_json.encode("utf-8")).hexdigest(),
+            holder=holder,
+        )
         try:
-            done = await transport.run(host, restore, check=False)
-            restored = f"RESTORE{SEP}done" in done.stdout
-        except RemoteCommandError:
-            restored = False
-        return _ApplyOutcome(backup=backup, error=exc, restored=restored)
+            done = await transport.run(host, restore, check=False, timeout=300)
+        except RemoteCommandError as again:
+            return _ApplyOutcome(
+                backup=backup, error=exc, restore="failed", restore_detail=str(again)
+            )
+        word, detail = "failed", (done.stderr.strip() or "no answer from the restore")
+        for fields in _lines(done.stdout, "RESTORE"):
+            if fields:
+                word = fields[0]
+                detail = (
+                    _unb64(fields[1]).decode("utf-8", "replace") if len(fields) > 1 else ""
+                )
+        return _ApplyOutcome(backup=backup, error=exc, restore=word, restore_detail=detail)
     return _ApplyOutcome(backup=backup)
+
+
+def _apply_failure(term: Terminal, outcome: _ApplyOutcome) -> str:
+    backup = outcome.backup or "(none: first deploy)"
+    head = f"apply failed ({outcome.error})"
+    if outcome.restore == "untouched":
+        return f"{head} before any file was changed; {term.id} was started again as it was"
+    if outcome.restore == "done":
+        return f"{head}; {term.id} was restored to its previous files and started again"
+    if outcome.restore == "lost":
+        return (
+            f"{head}, and another run took the lock over, so nothing was restored; "
+            f"check {term.id} against its backup {backup}"
+        )
+    why = (
+        "the apply was still running" if outcome.restore == "busy" else outcome.restore_detail
+    )
+    return (
+        f"{head}, and the restore did NOT complete ({why}); {term.id} was started on partly "
+        "applied files. The manifest covers both versions, so running the deploy again "
+        f"completes it; or unpack the backup {backup} into the data folder"
+    )
 
 
 async def adopt(

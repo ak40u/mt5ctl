@@ -46,11 +46,23 @@ lock ─ plan ─┬─ nothing to change ─ verify (no restart) ─ unlock
    (default 180 s). Verify reads only journal lines written after the start; the
    lines it looks for are defined in [`mt5spec.py`](../src/mt5ctl/mt5spec.py).
 
-If the apply fails, every file it touched is removed and the backup unpacked
-over them, then the terminal starts again and `deploy` exits with an error. If
-even the restore cannot complete (the connection is gone), the error says so and
-names the backup to unpack. A failed verify does not roll back; it exits with
-code 3 and says what is missing.
+If the apply fails, what happens depends on how far it got, and the error says
+which case it was:
+
+- **Nothing moved yet** (a checksum did not match, the upload broke): the files
+  are left as they were.
+- **Files moved**: the backup is unpacked into a work folder first; only when
+  that succeeded is every touched file put back (or removed, if it was new) and
+  the old manifest restored. If the backup cannot be read, no working file is
+  touched, and the error says the restore did not complete and names the backup.
+  Before its first move the apply records a manifest covering the old files and
+  the new ones together, so running the same deploy again completes it instead
+  of refusing the new files as a stranger's.
+- **The apply finished but its answer was lost**: the manifest on the host is
+  the new one, so the deploy counts as done.
+
+Then the terminal starts again. A failed verify does not roll back; it exits
+with code 3 and says what is missing.
 
 Once the terminal has been asked to stop, it is started again whatever happens
 next: an error, a dropped connection while stopping, or the caller giving up

@@ -187,13 +187,23 @@ def test_conflict_refuses_before_stopping(farm: Farm, tmp_path: Path) -> None:
     assert farm.calls == []
 
 
-def test_failed_apply_restores_and_restarts(
-    farm: Farm, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    farm.journal_on_start("Trend")
-    deploy(farm, bundle_v1(tmp_path / "v1"))
-    before = {p: (farm.data / p).read_bytes() for p in (EXPERT, CHART1, MANIFEST_RELPATH)}
+def fail_apply(monkeypatch: pytest.MonkeyPatch, where: str = "after-first-move") -> None:
+    """Make the apply script fail on the host at *where*: ``after-first-move``
+    (one file already replaced), or ``after-ok`` (finished, then the answer lost)."""
+    real = operations.scripts.build_apply_script
 
+    def broken(*args: Any, **kwargs: Any) -> str:
+        script = real(*args, **kwargs)
+        if where == "after-ok":
+            return script + "\nexit 1\n"
+        move = 'mv -f "$STG/$f" "$DIR/$f"'
+        assert move in script
+        return script.replace(move, move + "; exit 1", 1)
+
+    monkeypatch.setattr(operations.scripts, "build_apply_script", broken)
+
+
+def corrupt_upload(monkeypatch: pytest.MonkeyPatch) -> None:
     real = operations.build_upload
 
     def corrupt(
@@ -203,11 +213,95 @@ def test_failed_apply_restores_and_restarts(
         return tar, dict.fromkeys(shas, "0" * 64)
 
     monkeypatch.setattr(operations, "build_upload", corrupt)
-    with pytest.raises(DeployError, match="restored"):
+
+
+def snapshot(farm: Farm, paths: Iterable[str]) -> dict[str, bytes | None]:
+    return {
+        p: (farm.data / p).read_bytes() if (farm.data / p).exists() else None for p in paths
+    }
+
+
+def test_failed_apply_restores_and_restarts(
+    farm: Farm, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    farm.journal_on_start("Trend")
+    deploy(farm, bundle_v1(tmp_path / "v1"))
+    before = snapshot(farm, (EXPERT, CHART1, CHART2, BREAKOUT, MANIFEST_RELPATH, ORDER))
+    fail_apply(monkeypatch)
+    with pytest.raises(DeployError, match="restored to its previous files"):
         deploy(farm, bundle_v2(tmp_path / "v2"))
-    assert {p: (farm.data / p).read_bytes() for p in before} == before
-    assert not (farm.data / CHART2).exists() and not (farm.data / BREAKOUT).exists()
+    assert snapshot(farm, before) == before
+    assert not (farm.data / ".mt5ctl/applying").exists()
     assert farm.calls[-1] == "start mt5-demo1.service"
+
+
+def test_hash_failure_changes_nothing(
+    farm: Farm, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    farm.journal_on_start("Trend")
+    deploy(farm, bundle_v1(tmp_path / "v1"))
+    before = snapshot(farm, (EXPERT, CHART1, MANIFEST_RELPATH, ORDER))
+    corrupt_upload(monkeypatch)
+    with pytest.raises(DeployError, match="before any file was changed"):
+        deploy(farm, bundle_v2(tmp_path / "v2"))
+    assert snapshot(farm, before) == before
+    assert farm.calls[-1] == "start mt5-demo1.service"
+
+
+def test_unreadable_backup_is_reported_and_deletes_nothing(
+    farm: Farm, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The restore must not remove working files before it knows it can put them back."""
+    farm.journal_on_start("Trend", "Breakout")
+    deploy(farm, bundle_v1(tmp_path / "v1"))
+    real_apply = operations.scripts.build_apply_script
+    fail_apply(monkeypatch)
+    real = operations.scripts.build_restore_script
+
+    def backup_gone(data_dir: str, backup: str | None, *args: Any, **kwargs: Any) -> str:
+        assert backup is not None
+        return f"rm -f '{backup}'\n" + real(data_dir, backup, *args, **kwargs)
+
+    monkeypatch.setattr(operations.scripts, "build_restore_script", backup_gone)
+    with pytest.raises(DeployError, match=r"restore did NOT complete.*cannot unpack"):
+        deploy(farm, bundle_v2(tmp_path / "v2"))
+    # nothing was deleted: the files are as the apply left them
+    for path in (EXPERT, CHART1):
+        assert (farm.data / path).exists(), path
+    assert farm.calls[-1] == "start mt5-demo1.service"
+    # the interim manifest owns the new files: running the deploy again completes it
+    monkeypatch.setattr(operations.scripts, "build_apply_script", real_apply)
+    monkeypatch.setattr(operations.scripts, "build_restore_script", real)
+    result = deploy(farm, bundle_v2(tmp_path / "v2"))
+    assert not result.plan.blocked
+    assert (farm.data / BREAKOUT).read_bytes() == b"breakout v1"
+    assert set(manifest(farm)) >= {EXPERT, BREAKOUT, CHART1, CHART2}
+
+
+def test_answer_lost_after_a_finished_apply_is_a_success(
+    farm: Farm, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    farm.journal_on_start("Trend", "Breakout")
+    deploy(farm, bundle_v1(tmp_path / "v1"))
+    fail_apply(monkeypatch, "after-ok")
+    result = deploy(farm, bundle_v2(tmp_path / "v2"))
+    assert result.restarted
+    assert (farm.data / BREAKOUT).read_bytes() == b"breakout v1"
+
+
+def test_separator_in_the_data_folder_does_not_break_the_restore(
+    farm: Farm, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data = tmp_path / "data|terminal"
+    data.mkdir()
+    farm.registry = make_registry(data)
+    deploy(farm, bundle_v1(tmp_path / "v1"), verify_timeout=0)
+    before = (data / EXPERT).read_bytes()
+    fail_apply(monkeypatch)
+    with pytest.raises(DeployError, match="restored to its previous files"):
+        deploy(farm, bundle_v2(tmp_path / "v2"), verify_timeout=0)
+    assert (data / EXPERT).read_bytes() == before
+    assert not (data / BREAKOUT).exists()
 
 
 def test_failed_first_apply_leaves_no_manifest(
@@ -505,21 +599,6 @@ def test_kept_expert_stays_managed(farm: Farm, tmp_path: Path) -> None:
     assert BREAKOUT in again.plan.unchanged
 
 
-def test_failed_restore_is_reported_as_such(
-    farm: Farm, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    real = operations.build_upload
-    monkeypatch.setattr(
-        operations,
-        "build_upload",
-        lambda b, p, g=None: (real(b, p, g)[0], dict.fromkeys([*p, *(g or {})], "0" * 64)),
-    )
-    monkeypatch.setattr(operations.scripts, "build_restore_script", lambda *a: "exit 1")
-    with pytest.raises(DeployError, match="restore did not complete"):
-        deploy(farm, bundle_v1(tmp_path / "v1"))
-    assert farm.calls[-1] == "start mt5-demo1.service"
-
-
 def test_unreadable_journal_cursor_does_not_block_the_start(
     farm: Farm, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -598,13 +677,8 @@ def test_failed_apply_restores_the_order_file(
     farm.journal_on_start("Trend")
     deploy(farm, bundle_v1(tmp_path / "v1"))
     before = (farm.data / ORDER).read_bytes()
-    real = operations.build_upload
-    monkeypatch.setattr(
-        operations,
-        "build_upload",
-        lambda b, p, g=None: (real(b, p, g)[0], dict.fromkeys([*p, *(g or {})], "0" * 64)),
-    )
-    with pytest.raises(DeployError, match="restored"):
+    fail_apply(monkeypatch)
+    with pytest.raises(DeployError, match="restored to its previous files"):
         deploy(farm, bundle_v2(tmp_path / "v2"))
     assert (farm.data / ORDER).read_bytes() == before
 

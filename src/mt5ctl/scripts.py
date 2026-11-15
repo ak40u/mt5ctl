@@ -337,8 +337,9 @@ echo "USER{SEP}${{u:-$(id -un)}}"
 def build_backup_script(data_dir: str, paths: Iterable[str], ts: str) -> str:
     """Tar the present *paths* plus the manifest into ``backups/<ts>.tar``.
 
-    Keeps the newest :data:`BACKUPS_KEPT`. Prints ``BACKUP|<path>`` or
-    ``BACKUP|none`` when there is nothing to back up (first deploy).
+    Keeps the newest :data:`BACKUPS_KEPT`. Prints ``BACKUP|<b64 path>`` (the
+    data folder may hold the separator) or ``BACKUP|none`` when there is
+    nothing to back up (first deploy).
     """
     adds = "\n".join(
         f'[ -f "$DIR/"{sh_quote(p)} ] && printf "%s\\n" {sh_quote(p)} >> "$LIST"'
@@ -354,7 +355,7 @@ LIST=$(mktemp "$DIR/{STATE_DIR}/backup-list.XXXXXX")
 [ -f "$DIR/{MANIFEST_RELPATH}" ] && printf '%s\\n' {sh_quote(MANIFEST_RELPATH)} >> "$LIST"
 if [ -s "$LIST" ]; then
   tar -C "$DIR" -cf "$BK/"{sh_quote(ts)}.tar -T "$LIST"
-  echo "BACKUP{SEP}$BK/"{sh_quote(ts)}.tar
+  echo "BACKUP{SEP}$(printf '%s' "$BK/"{sh_quote(ts)}.tar | base64 | tr -d '\\n')"
 else
   echo "BACKUP{SEP}none"
 fi
@@ -380,6 +381,9 @@ fi
 """
 
 
+APPLYING_MARK = f"{STATE_DIR}/applying"
+
+
 def build_apply_script(
     data_dir: str,
     staging: str,
@@ -388,16 +392,19 @@ def build_apply_script(
     manifest_json: str,
     unit_user: str,
     holder: str | None = None,
+    interim_manifest_json: str | None = None,
 ) -> str:
     """Verify staged files, move them into place, remove dropped ones, write the manifest.
 
     *place* maps each destination path (also its path inside *staging*) to the
     sha256 of the bundle's bytes. Every staged file is checked **before any
-    move**, so a truncated upload aborts with the terminal untouched. The
-    manifest is written last: if any step fails (``set -e``), the old manifest
-    still describes the old state and the orchestrator restores the backup.
-    Prints ``APPLY|ok``, or ``APPLY|hashfail|<path>`` before exiting 1. With
-    *holder*, nothing is written unless it still owns the lock (``APPLY|lost``).
+    move**, so a truncated upload aborts with the terminal untouched. Before
+    the first move it writes :data:`APPLYING_MARK` (its pid) and, when given,
+    *interim_manifest_json*: the old manifest and the new one together, so
+    that a run cut short leaves no file the next deploy takes for a stranger's.
+    The final manifest is written last, then the mark is removed. Prints
+    ``APPLY|ok``, or ``APPLY|hashfail|<path>`` before exiting 1. With *holder*,
+    nothing is written unless it still owns the lock (``APPLY|lost``).
     """
     guard = lock_guard(holder, "APPLY") if holder else ""
     verify = "\n".join(
@@ -410,6 +417,13 @@ def build_apply_script(
         for rel in place
     )
     removes = "\n".join(f'rm -f "$DIR/"{sh_quote(rel)}' for rel in remove)
+    interim = (
+        f'TMP=$(mktemp "$DIR/{STATE_DIR}/manifest.XXXXXX")\n'
+        f'echo {_b64(interim_manifest_json)} | base64 -d > "$TMP"\n'
+        f'mv -f "$TMP" "$DIR/{MANIFEST_RELPATH}"'
+        if interim_manifest_json is not None
+        else ""
+    )
     return f"""\
 set -e
 {HELPERS}
@@ -417,11 +431,14 @@ DIR={sh_quote(data_dir)}
 {guard}
 STG="$DIR/"{sh_quote(staging)}
 {verify}
+{interim}
+echo $$ > "$DIR/{APPLYING_MARK}"
 {moves}
 {removes}
 TMP=$(mktemp "$DIR/{STATE_DIR}/manifest.XXXXXX")
 echo {_b64(manifest_json)} | base64 -d > "$TMP"
 mv -f "$TMP" "$DIR/{MANIFEST_RELPATH}"
+rm -f "$DIR/{APPLYING_MARK}"
 rm -rf "$STG"
 {_chown_block(unit_user, [*place, STATE_DIR])}
 echo "APPLY{SEP}ok"
@@ -429,26 +446,90 @@ echo "APPLY{SEP}ok"
 
 
 def build_restore_script(
-    data_dir: str, backup_tar: str | None, touched: Iterable[str], unit_user: str
+    data_dir: str,
+    backup_tar: str | None,
+    touched: Iterable[str],
+    unit_user: str,
+    *,
+    new_manifest_sha: str | None = None,
+    holder: str | None = None,
+    wait_s: int = 120,
 ) -> str:
-    """Undo a failed apply: remove every touched path, then unpack the backup.
+    """Undo a failed apply, or say why there is nothing to undo.
 
-    Removing first makes files new in this deploy disappear (they are not in
-    the backup). Best effort throughout: every step is attempted.
+    Prints one of:
+
+    * ``RESTORE|untouched``: the apply never started moving files (no
+      :data:`APPLYING_MARK`) and did not finish either; nothing changed.
+    * ``RESTORE|applied``: no mark and the manifest is the new one
+      (*new_manifest_sha*): the apply did finish, only its answer was lost.
+    * ``RESTORE|done``: every touched path is back as in the backup (or gone,
+      when it was new), and so is the manifest.
+    * ``RESTORE|failed|<b64 reason>``: something could not be put back; the
+      files the apply wrote stay, and so does its interim manifest.
+    * ``RESTORE|busy``: the apply is still running after *wait_s* seconds.
+
+    The backup is unpacked into a work folder first: if it cannot be read,
+    no working file is touched.
     """
-    purge = "\n".join(f'rm -f "$DIR/"{sh_quote(p)}' for p in touched)
-    extract = (
-        f'tar -C "$DIR" -xf {sh_quote(backup_tar)} --no-same-owner'
+    guard = lock_guard(holder, "RESTORE") if holder else ""
+    paths = list(touched)
+    unpack = (
+        f'tar -C "$T" -xf {sh_quote(backup_tar)} --no-same-owner 2>"$T.err" '
+        f'|| fail "cannot unpack the backup {backup_tar}: $(head -c 300 "$T.err")"'
         if backup_tar
-        else f'rm -f "$DIR/{MANIFEST_RELPATH}"'
+        else ""
+    )
+    put_back = "\n".join(
+        f"""f={sh_quote(rel)}
+if [ -f "$T/$f" ]; then
+  mkdir -p "$(dirname "$DIR/$f")" && mv -f "$T/$f" "$DIR/$f" || bad="$bad $f"
+else
+  rm -f "$DIR/$f" || bad="$bad $f"
+fi"""
+        for rel in paths
     )
     return f"""\
 set +e
+{HELPERS}
 DIR={sh_quote(data_dir)}
-{purge}
-{extract}
-rm -rf "$DIR/{STAGING_DIR}"
-{_chown_block(unit_user, [*touched, STATE_DIR])}
+{guard}
+MARK="$DIR/{APPLYING_MARK}"
+T=""
+fail() {{
+  [ -n "$T" ] && rm -rf "$T" "$T.err"
+  echo "RESTORE{SEP}failed{SEP}$(b64s "$1")"; exit 1
+}}
+if [ ! -f "$MARK" ]; then
+  rm -rf "$DIR/{STAGING_DIR}"
+  if [ -n {sh_quote(new_manifest_sha or "")} ] && [ -f "$DIR/{MANIFEST_RELPATH}" ] \\
+    && [ "$(sha "$DIR/{MANIFEST_RELPATH}")" = {sh_quote(new_manifest_sha or "")} ]; then
+    echo "RESTORE{SEP}applied"
+  else
+    echo "RESTORE{SEP}untouched"
+  fi
+  exit 0
+fi
+pid=$(cat "$MARK" 2>/dev/null)
+case "$pid" in ''|*[!0-9]*) pid="" ;; esac
+i=0
+while [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && [ "$i" -lt {int(wait_s)} ]; do
+  sleep 1; i=$((i + 1))
+done
+if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then echo "RESTORE{SEP}busy"; exit 1; fi
+T=$(mktemp -d "$DIR/{STATE_DIR}/restore.XXXXXX") || fail "cannot create a work folder"
+{unpack}
+bad=""
+{put_back}
+[ -n "$bad" ] && fail "could not put back:$bad"
+if [ -f "$T/{MANIFEST_RELPATH}" ]; then
+  mv -f "$T/{MANIFEST_RELPATH}" "$DIR/{MANIFEST_RELPATH}" || fail "could not put back the manifest"
+else
+  rm -f "$DIR/{MANIFEST_RELPATH}"
+fi
+rm -rf "$T" "$T.err" "$DIR/{STAGING_DIR}"
+rm -f "$MARK"
+{_chown_block(unit_user, [*paths, STATE_DIR])}
 echo "RESTORE{SEP}done"
 """
 
