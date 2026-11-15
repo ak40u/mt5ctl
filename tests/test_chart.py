@@ -260,6 +260,13 @@ def test_set_expert_inserts_before_first_window() -> None:
     )
 
 
+def test_new_expert_block_is_followed_by_a_blank_line() -> None:
+    chart = ChartFile.read(CHARTS / "terminal-h1.chr")
+    chart.set_expert(Expert(name="X", path=r"Experts\X.ex5", mode=1))
+    text = chart.to_bytes().decode("utf-16")
+    assert "</expert>\r\n\r\n<window>" in text
+
+
 def test_remove_expert() -> None:
     chart = ChartFile.parse(chart_bytes())
     assert chart.remove_expert() is True

@@ -350,6 +350,21 @@ def evaluate_verify(
     )
 
 
+def _settled(report: VerifyReport) -> bool:
+    """An unhealthy outcome that waiting will not change.
+
+    The terminal has started, is connected and every expert has loaded or
+    failed; what is left (trading disabled for the account, a failed expert)
+    stays as it is however long verify polls.
+    """
+    return (
+        report.started is not False
+        and report.connected is True
+        and not report.pending
+        and (report.trading_disabled is not None or bool(report.failed))
+    )
+
+
 def _verify_window(timeout: float | None, default: float) -> float:
     value = default if timeout is None else timeout
     if not 0 <= value <= MAX_VERIFY_TIMEOUT_S:
@@ -372,7 +387,7 @@ async def _verify(
     while True:
         st = (await status(registry, [term.id]))[0]
         report = evaluate_verify(st, await journal(), expected, require_start=require_start)
-        if report.healthy or time.monotonic() + interval > deadline:
+        if report.healthy or _settled(report) or time.monotonic() + interval > deadline:
             return report
         await asyncio.sleep(interval)
 

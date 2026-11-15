@@ -387,7 +387,8 @@ class ChartFile:
                 ),
                 len(children),
             )
-            children.insert(first_window, section)
+            # The terminal writes a blank line after </expert> (observed).
+            children[first_window:first_window] = [section, Text("")]
         section.set("name", expert.name)
         section.set("path", expert.path)
         if expert.mode is not None:

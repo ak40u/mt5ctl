@@ -688,3 +688,18 @@ def test_stopping_a_stopped_terminal_is_clean(farm: Farm, tmp_path: Path) -> Non
     farm.journal_on_start("Trend")
     deployed = deploy(farm, bundle_v1(tmp_path / "v1"))
     assert deployed.stopped_cleanly is True
+
+
+def test_verify_stops_waiting_when_the_outcome_is_settled(farm: Farm, tmp_path: Path) -> None:
+    """Investor mode: every expert loaded, connected, trading disabled -> no point waiting."""
+    import time as _time
+
+    farm.journal_on_start("Trend")
+    with (farm.systemd / "journal.bin").open("ab") as fh:
+        line = "0\t12:00:03.000\tNetwork\t'1': trading has been disabled - investor mode\r\n"
+        fh.write(line.encode("utf-16-le"))
+    began = _time.monotonic()
+    result = deploy(farm, bundle_v1(tmp_path / "v1"), verify_timeout=30.0)
+    assert _time.monotonic() - began < 15
+    assert result.verify is not None and result.verify.trading_disabled == "investor mode"
+    assert not result.verify.healthy
