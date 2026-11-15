@@ -1056,8 +1056,12 @@ async def deploy(
     confirm: bool = False,
     verify_timeout: float | None = None,
     verify_interval: float | None = None,
+    start: bool = False,
 ) -> DeployResult:
     """Make the terminal's managed files match *bundle_dir*.
+
+    A terminal that was stopped before the deploy stays stopped, unless
+    *start*: then it is started after the apply and verified.
 
     Sequence: lock → plan → (if anything changes) preflight → stop → drain →
     plan again on the quiet files → backup → upload → apply → start → verify →
@@ -1115,13 +1119,17 @@ async def deploy(
             )
             (now,) = await status(registry, [term.id])
             if now.service_state in ("inactive", "failed"):
-                # Stopped by someone (on news, for a fix): deploy, but leave it so.
+                # Stopped by someone (on news, for a fix): deploy, but leave it so
+                # unless asked to start it.
                 if now.terminal_running:
                     raise DeployError(
                         f"{term.id}'s unit is {now.service_state}, yet a terminal process "
                         "runs on its data folder; stop it before deploying"
                     )
-                left_stopped = True
+                if start:
+                    stop_requested = True  # nothing to stop; started after the apply
+                else:
+                    left_stopped = True
             else:
                 # Counted as stopped before asking: a stop that reports an error (a
                 # dropped connection, a slow ExecStop) may still complete on the

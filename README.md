@@ -244,7 +244,7 @@ midway, the terminal is still started again and the lock released.
 | `autotrading [terminal…]` | the Algo Trading button (from the journal, or the start file's `[Experts] Enabled`) and how many experts can trade | no |
 | `screenshot <terminal> [-o PATH]` | save a PNG of the terminal's screen (over MCP the agent gets the image) | no |
 | `logs <terminal> [-n N] [--grep RE] [--experts]` | the end of the newest journal, or of the experts' log (`Print` output) | no |
-| `deploy <terminal> <bundle>` | apply a bundle | yes |
+| `deploy <terminal> <bundle> [--start]` | apply a bundle; a stopped terminal stays stopped unless `--start` | yes |
 | `adopt <terminal> <bundle>` | record a bundle the terminal already runs as managed | manifest only |
 | `start <terminal>` / `stop <terminal>` | start or stop through systemd (or in [process mode](docs/deploy.md#without-systemd-process-mode)); `stop` says whether the terminal closed itself | starts / stops it |
 | `restart <terminal>` | restart, then verify | restarts it |

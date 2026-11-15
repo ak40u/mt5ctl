@@ -94,7 +94,7 @@ def deploy_lines(result: DeployResult) -> list[str]:
     if result.left_stopped:
         lines.append(
             "the terminal was stopped before the deploy and is left stopped; "
-            f"start it with: mt5ctl start {result.terminal}"
+            f"start it with: mt5ctl start {result.terminal} (or deploy with --start)"
         )
     else:
         lines.append("restarted" if result.restarted else "not restarted (nothing changed)")

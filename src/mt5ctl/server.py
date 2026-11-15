@@ -172,18 +172,28 @@ def build_server(config: str | None = None) -> MCPServer:
     @mcp.tool(annotations=CHANGES)
     @_guard
     async def mt5_deploy(
-        terminal: str, bundle: str, confirm: bool = False, verify_timeout: float | None = None
+        terminal: str,
+        bundle: str,
+        confirm: bool = False,
+        verify_timeout: float | None = None,
+        start: bool = False,
     ) -> str:
         """Apply a local bundle: stop, back up, apply, start, verify.
 
         Only files mt5ctl placed earlier are updated or removed; foreign charts
         stay. A failed apply is restored from the backup before the restart.
-        Nothing to change means no restart.
+        Nothing to change means no restart. A terminal that was stopped stays
+        stopped, unless start=true.
 
         A terminal with env=live is refused unless confirm=true.
         """
         result = await operations.deploy(
-            tools.registry, terminal, bundle, confirm=confirm, verify_timeout=verify_timeout
+            tools.registry,
+            terminal,
+            bundle,
+            confirm=confirm,
+            verify_timeout=verify_timeout,
+            start=start,
         )
         return "\n".join(fmt.deploy_lines(result))
 

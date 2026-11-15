@@ -943,3 +943,16 @@ def test_a_terminal_left_on_the_folder_stops_the_deploy(farm: Farm, tmp_path: Pa
         assert farm.calls == ["stop mt5-demo1.service", "start mt5-demo1.service"]
     finally:
         other.kill()
+
+
+def test_deploy_with_start_starts_a_stopped_terminal(farm: Farm, tmp_path: Path) -> None:
+    farm.set_state("inactive")
+    farm.journal_on_start("Trend")
+    result = asyncio.run(
+        operations.deploy(
+            farm.registry, "demo1", bundle_v1(tmp_path / "v1"), verify_timeout=2, start=True
+        )
+    )
+    assert not result.left_stopped and result.restarted
+    assert result.verify is not None and result.verify.healthy
+    assert farm.calls == ["start mt5-demo1.service"]

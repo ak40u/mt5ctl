@@ -160,6 +160,7 @@ def _cmd_deploy(args: argparse.Namespace) -> int:
             args.bundle,
             confirm=args.confirm_live,
             verify_timeout=args.verify_timeout,
+            start=args.start,
         )
     )
     _output(args, fmt.deploy_payload(result), fmt.deploy_lines(result))
@@ -444,6 +445,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     deploy = with_verify(with_live(terminal_command("deploy", "apply a bundle to a terminal")))
     deploy.add_argument("bundle", help="bundle directory")
+    deploy.add_argument(
+        "--start",
+        action="store_true",
+        help="start the terminal after the deploy even if it was stopped before",
+    )
     deploy.set_defaults(func=_cmd_deploy)
 
     adopt = with_live(
