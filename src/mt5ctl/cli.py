@@ -171,7 +171,13 @@ def _cmd_deploy(args: argparse.Namespace) -> int:
 def _cmd_adopt(args: argparse.Namespace) -> int:
     registry = load_registry(args.config)
     result = _run(
-        operations.adopt(registry, args.terminal, args.bundle, confirm=args.confirm_live)
+        operations.adopt(
+            registry,
+            args.terminal,
+            args.bundle,
+            confirm=args.confirm_live,
+            replace=args.replace,
+        )
     )
     _output(args, asdict(result), fmt.adopt_lines(result))
     return EXIT_OK
@@ -446,6 +452,11 @@ def build_parser() -> argparse.ArgumentParser:
         )
     )
     adopt.add_argument("bundle", help="bundle directory")
+    adopt.add_argument(
+        "--replace",
+        action="store_true",
+        help="on a managed terminal, stop managing files the bundle does not have",
+    )
     adopt.set_defaults(func=_cmd_adopt)
 
     status = with_config(

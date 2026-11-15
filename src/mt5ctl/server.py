@@ -179,15 +179,22 @@ def build_server(config: str | None = None) -> MCPServer:
 
     @mcp.tool(annotations=CHANGES)
     @_guard
-    async def mt5_adopt(terminal: str, bundle: str, confirm: bool = False) -> str:
+    async def mt5_adopt(
+        terminal: str, bundle: str, confirm: bool = False, replace: bool = False
+    ) -> str:
         """Record a bundle the terminal already runs as managed. Changes no strategy file.
 
         Run once before the first mt5_deploy on a terminal set up by hand;
         every bundle file must already be on the terminal.
 
+        On a terminal already managed, files the bundle leaves out would stop
+        being managed: refused unless replace=true.
+
         A terminal with env=live is refused unless confirm=true.
         """
-        result = await operations.adopt(tools.registry, terminal, bundle, confirm=confirm)
+        result = await operations.adopt(
+            tools.registry, terminal, bundle, confirm=confirm, replace=replace
+        )
         return "\n".join(fmt.adopt_lines(result))
 
     @mcp.tool(annotations=CHANGES)

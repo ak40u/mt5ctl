@@ -895,3 +895,16 @@ def test_deploy_to_a_folder_without_mql5_writes_nothing(farm: Farm, tmp_path: Pa
     with pytest.raises(DeployError, match="no MQL5 folder"):
         deploy(farm, bundle_v1(tmp_path / "v1"))
     assert farm.calls == [] and list(wrong.iterdir()) == []
+
+
+def test_adopt_never_silently_unmanages_files(farm: Farm, tmp_path: Path) -> None:
+    """Adopting a smaller bundle would leave Breakout running and unmanaged."""
+    farm.journal_on_start("Trend", "Breakout")
+    deploy(farm, bundle_v2(tmp_path / "v2"))
+    small = bundle_v1(tmp_path / "v1")
+    (farm.data / EXPERT).write_bytes(b"trend v1")  # the terminal does run v1's files
+    with pytest.raises(DeployError, match=r"unmanaged.*Breakout\.ex5.*--replace"):
+        asyncio.run(operations.adopt(farm.registry, "demo1", small))
+    assert BREAKOUT in manifest(farm)
+    asyncio.run(operations.adopt(farm.registry, "demo1", small, replace=True))
+    assert BREAKOUT not in manifest(farm)

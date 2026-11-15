@@ -32,6 +32,7 @@ from .auth import resolve_password, secrets_file
 from .bundle import (
     EXPERTS_DIR,
     Bundle,
+    is_chart,
     order_relpath,
     read_bundle,
     render_order,
@@ -1266,7 +1267,12 @@ def _apply_failure(term: Terminal, outcome: _ApplyOutcome) -> str:
 
 
 async def adopt(
-    registry: Registry, terminal_id: str, bundle_dir: str | Path, *, confirm: bool = False
+    registry: Registry,
+    terminal_id: str,
+    bundle_dir: str | Path,
+    *,
+    confirm: bool = False,
+    replace: bool = False,
 ) -> AdoptResult:
     """Take a terminal that already runs *bundle_dir* under management.
 
@@ -1275,6 +1281,10 @@ async def adopt(
     Every bundle file must already be present: adopting a bundle the terminal
     does not run would record a state that does not exist. Files whose content
     differs from the bundle are reported as drifted; the next deploy updates them.
+
+    On a terminal mt5ctl already manages, files the manifest lists but the
+    bundle does not would silently stop being managed (left running, never
+    updated or removed again): that is refused unless *replace*.
     """
     term = registry.terminal(terminal_id)
     host = registry.host_of(term)
@@ -1291,6 +1301,22 @@ async def adopt(
         if state.manifest is not None and state.manifest.profile != bundle.profile:
             raise DeployError(
                 f"the terminal is already managed in profile {state.manifest.profile!r}"
+            )
+        dropped = sorted(
+            p
+            for p in (state.manifest.files if state.manifest else {})
+            # A chart's presence is known; an expert outside the bundle was not
+            # probed, so it counts as present.
+            if p not in bundle.files and (not is_chart(p) or p in state.charts)
+        )
+        if dropped and not replace:
+            raise DeployError(
+                "the terminal is already managed, and adopting this bundle would leave "
+                f"{len(dropped)} managed file(s) unmanaged, still on the terminal: "
+                + ", ".join(dropped[:8])
+                + (" ..." if len(dropped) > 8 else "")
+                + ". Deploy a bundle without them to remove them, or adopt with --replace "
+                "(replace=true) to stop managing them"
             )
         recorded = {p: d for p in bundle.files if (d := state.files[p]) is not None}
         unit_user = await _preflight(host, term)
