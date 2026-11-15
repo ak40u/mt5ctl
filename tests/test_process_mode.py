@@ -19,7 +19,7 @@ def registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Registry:
     # The fakes (ss among them) first, so results do not depend on the machine.
     monkeypatch.setenv("PATH", f"{FAKES}{os.pathsep}{os.environ['PATH']}")
     data = tmp_path / "terminal"
-    data.mkdir()
+    (data / "MQL5").mkdir(parents=True)
     return Registry(
         hosts={"here": Host("here")},
         terminals={

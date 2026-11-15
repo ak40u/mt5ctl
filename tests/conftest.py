@@ -79,7 +79,7 @@ def make_registry(data: Path, env: Env = Env.DEMO, service: str | None = UNIT) -
 @pytest.fixture
 def farm(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Farm:
     data = tmp_path / "terminal data"
-    data.mkdir()
+    (data / "MQL5").mkdir(parents=True)
     systemd = tmp_path / "systemd"
     systemd.mkdir()
     monkeypatch.setenv("FAKE_SYSTEMD", str(systemd))

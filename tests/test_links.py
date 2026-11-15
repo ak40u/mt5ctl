@@ -51,7 +51,7 @@ def test_apply_refuses_a_linked_folder(tmp_path: Path) -> None:
 def test_deploy_refuses_before_stopping_the_terminal(farm: Farm, tmp_path: Path) -> None:
     outside = tmp_path / "outside"
     outside.mkdir()
-    (farm.data / "MQL5").mkdir()
+    (farm.data / "MQL5").mkdir(exist_ok=True)
     (farm.data / "MQL5/Experts").symlink_to(outside)
     with pytest.raises(DeployError, match=r"MQL5/Experts is a symbolic link"):
         asyncio.run(operations.deploy(farm.registry, "demo1", bundle(tmp_path / "b")))

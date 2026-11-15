@@ -26,7 +26,7 @@ def sources(root: Path, files: dict[str, str]) -> Path:
 def editor(farm: Farm, tmp_path: Path) -> Farm:
     """The farm's terminal, moved to a data folder without spaces (MetaEditor needs it)."""
     data = tmp_path / "build-terminal"
-    data.mkdir()
+    (data / "MQL5").mkdir(parents=True)
     (data / "MetaEditor64.exe").write_bytes(b"MZ")
     farm.data = data
     farm.registry = make_registry(data)

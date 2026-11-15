@@ -123,6 +123,18 @@ def _plain(value: str, field: str, where: str) -> str:
     return value
 
 
+_WINDOWS_ABSOLUTE_RE = re.compile(r"[A-Za-z]:[\\/]")
+
+
+def _absolute(path: str, where: str) -> str:
+    """An absolute data folder: a relative one, or ``~``, would be taken as a
+    folder under the SSH user's home, and a deploy would fill a new tree there."""
+    if path.startswith("/") or _WINDOWS_ABSOLUTE_RE.match(path):
+        return path
+    hint = " (~ is not expanded: write the full path)" if path.startswith("~") else ""
+    raise ConfigError(f"{where}: data_dir must be an absolute path, got {path!r}{hint}")
+
+
 def _check_id(kind: str, value: str) -> str:
     if not _ID_RE.fullmatch(value):
         raise ConfigError(
@@ -197,7 +209,9 @@ def _build_terminal(term_id: str, raw: dict[str, Any], hosts: dict[str, Host]) -
     return Terminal(
         id=term_id,
         host=host_id,
-        data_dir=_plain(_required(raw, "data_dir", where), "data_dir", where),
+        data_dir=_absolute(
+            _plain(_required(raw, "data_dir", where), "data_dir", where), where
+        ),
         profile=profile,
         env=env,
         account=_plain(str(raw["account"]), "account", where) if raw.get("account") else None,

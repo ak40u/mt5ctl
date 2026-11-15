@@ -21,7 +21,7 @@ def setup(tmp_path: Path) -> tuple[Path, Path, Path]:
         tmp_path / "bundle", charts={"chart01.chr": chart_bytes()}, experts={EXPERT: b"v2"}
     )
     data = tmp_path / "terminal"
-    data.mkdir()
+    (data / "MQL5").mkdir(parents=True)
     config = tmp_path / "terminals.yaml"
     config.write_text(
         "hosts:\n  here:\n    kind: local\n"

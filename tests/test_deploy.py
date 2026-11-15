@@ -294,7 +294,7 @@ def test_separator_in_the_data_folder_does_not_break_the_restore(
     farm: Farm, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     data = tmp_path / "data|terminal"
-    data.mkdir()
+    (data / "MQL5").mkdir(parents=True)
     farm.registry = make_registry(data)
     deploy(farm, bundle_v1(tmp_path / "v1"), verify_timeout=0)
     before = (data / EXPERT).read_bytes()
@@ -876,3 +876,12 @@ def test_deploy_verify_needs_every_chart_of_an_expert(farm: Farm, tmp_path: Path
     assert result.verify is not None and not result.verify.healthy
     assert result.verify.loaded == ("Trend (EURUSD,H4)",)
     assert result.verify.pending == ("Trend (GBPUSD,H1)",)
+
+
+def test_deploy_to_a_folder_without_mql5_writes_nothing(farm: Farm, tmp_path: Path) -> None:
+    wrong = tmp_path / "not-a-terminal"
+    wrong.mkdir()
+    farm.registry = make_registry(wrong)
+    with pytest.raises(DeployError, match="no MQL5 folder"):
+        deploy(farm, bundle_v1(tmp_path / "v1"))
+    assert farm.calls == [] and list(wrong.iterdir()) == []

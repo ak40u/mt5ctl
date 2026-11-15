@@ -35,6 +35,7 @@ def test_every_value_is_single_quoted() -> None:
 
 
 def test_lock_round_trip(tmp_path: Path) -> None:
+    (tmp_path / "it's here" / "MQL5").mkdir(parents=True)
     data = str(tmp_path / "it's here")
     assert "LOCK|acquired" in run(scripts.build_lock_acquire_script(data, "a", 600)).stdout
     held = run(scripts.build_lock_acquire_script(data, "b", 600))

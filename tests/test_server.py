@@ -64,7 +64,7 @@ def test_expected_errors_become_tool_errors() -> None:
 def test_plan_tool(tmp_path: Path) -> None:
     config = tmp_path / "terminals.yaml"
     data = tmp_path / "data"
-    data.mkdir()
+    (data / "MQL5").mkdir(parents=True)
     config.write_text(
         "hosts:\n  here: {kind: local}\n"
         f"terminals:\n  t1: {{host: here, data_dir: '{data}'}}\n"

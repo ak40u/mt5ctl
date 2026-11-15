@@ -241,6 +241,8 @@ DIR={sh_quote(data_dir)}
 H={sh_quote(holder)}
 L="$DIR/{LOCK_PATH}"
 M="$L.takeover"
+# Not a terminal's data folder (a typo, a wrong host): create nothing there.
+[ -d "$DIR/MQL5" ] || {{ echo "LOCK{SEP}nodata"; exit 1; }}
 mkdir -p "$DIR/{STATE_DIR}"
 now=$(date +%s)
 if ln -s "$H $now" "$L" 2>/dev/null; then echo "LOCK{SEP}acquired"; exit 0; fi

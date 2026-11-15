@@ -37,6 +37,7 @@ def test_lock_data_is_never_evaluated(tmp_path: Path) -> None:
         "99999999999999",
     ):
         data = tmp_path / f"t{abs(hash(ts))}"
+        (data / "MQL5").mkdir(parents=True)
         plant_lock(data, f"evil {ts}")
         out = bash(scripts.build_lock_acquire_script(str(data), "me", 3600))
         assert not marker.exists(), ts
@@ -46,6 +47,7 @@ def test_lock_data_is_never_evaluated(tmp_path: Path) -> None:
 
 
 def test_fresh_lock_is_held_and_names_its_owner(tmp_path: Path) -> None:
+    (tmp_path / "MQL5").mkdir()
     plant_lock(tmp_path, f"other:1:abc {int(time.time())}")
     out = bash(scripts.build_lock_acquire_script(str(tmp_path), "me", 3600))
     assert out.returncode == 1
@@ -56,6 +58,7 @@ def test_fresh_lock_is_held_and_names_its_owner(tmp_path: Path) -> None:
 
 def test_two_takers_of_a_stale_lock_one_wins(tmp_path: Path) -> None:
     """B judged the lock stale, then A took it over: B must not take A's lock."""
+    (tmp_path / "MQL5").mkdir()
     plant_lock(tmp_path, "old 1000")
     slow = scripts.build_lock_acquire_script(str(tmp_path), "B", 3600).replace(
         "age=$((now - ts))\n", "age=$((now - ts))\nsleep 1\n", 1
@@ -72,6 +75,7 @@ def test_two_takers_of_a_stale_lock_one_wins(tmp_path: Path) -> None:
 
 
 def test_dead_takeover_mutex_expires(tmp_path: Path) -> None:
+    (tmp_path / "MQL5").mkdir()
     plant_lock(tmp_path, "old 1000")
     mutex = tmp_path / ".mt5ctl/lock.takeover"
     mutex.mkdir()
@@ -81,6 +85,7 @@ def test_dead_takeover_mutex_expires(tmp_path: Path) -> None:
 
 
 def test_release_only_by_its_owner(tmp_path: Path) -> None:
+    (tmp_path / "MQL5").mkdir()
     assert "acquired" in bash(scripts.build_lock_acquire_script(str(tmp_path), "a", 60)).stdout
     assert "notowner" in bash(scripts.build_lock_release_script(str(tmp_path), "b")).stdout
     assert "notowner" in bash(scripts.build_lock_release_script(str(tmp_path), "a 1")).stdout
@@ -125,3 +130,11 @@ def test_cancel_while_taking_the_lock_leaves_none(
     state = farm.data / ".mt5ctl"
     assert not [p.name for p in state.iterdir() if "lock" in p.name]
     assert farm.calls == []
+
+
+def test_no_lock_and_nothing_created_outside_a_data_folder(tmp_path: Path) -> None:
+    """A wrong data_dir must not grow a .mt5ctl tree (and then a whole bundle)."""
+    wrong = tmp_path / "typo"
+    out = bash(scripts.build_lock_acquire_script(str(wrong), "me", 3600))
+    assert out.returncode == 1 and "LOCK|nodata" in out.stdout
+    assert not wrong.exists()

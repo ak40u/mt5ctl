@@ -134,3 +134,21 @@ def test_load_registry_file_errors(tmp_path: Path, text: str, message: str) -> N
     path.write_text(text)
     with pytest.raises(ConfigError, match=message):
         load_registry(path)
+
+
+@pytest.mark.parametrize("path", ["~/mt5/demo1", "mt5/demo1", "./demo1"])
+def test_data_dir_must_be_absolute(path: str) -> None:
+    raw = {
+        "hosts": {"h": {"kind": "local"}},
+        "terminals": {"t": {"host": "h", "data_dir": path}},
+    }
+    with pytest.raises(ConfigError, match="absolute"):
+        parse_registry(raw)
+
+
+def test_windows_data_dir_is_absolute_too() -> None:
+    raw = {
+        "hosts": {"h": {"kind": "local"}},
+        "terminals": {"t": {"host": "h", "data_dir": "C:\\Users\\me\\MT5"}},
+    }
+    assert parse_registry(raw).terminals["t"].data_dir == "C:\\Users\\me\\MT5"

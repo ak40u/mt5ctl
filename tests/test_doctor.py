@@ -23,7 +23,7 @@ def by_label(checks: list[Check]) -> dict[str, Check]:
 
 @pytest.fixture
 def ready(farm: Farm) -> Farm:
-    (farm.data / "MQL5").mkdir()
+    (farm.data / "MQL5").mkdir(exist_ok=True)
     (farm.data / "terminal64.exe").write_bytes(b"MZ")
     farm.journal_on_start()
     (farm.data / "logs").mkdir()

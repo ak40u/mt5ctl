@@ -755,6 +755,11 @@ async def _locked(host: Host, term: Terminal) -> AsyncIterator[str]:
                 f"finishes. A lock older than {LOCK_STALE_S // 60} minutes is taken over; "
                 f"if no run is going on, remove {term.data_dir}/{scripts.LOCK_PATH}"
             )
+    if f"LOCK{SEP}nodata" in result.stdout:
+        raise DeployError(
+            f"{term.data_dir} on {host.id} has no MQL5 folder: not a terminal's data folder "
+            f"(check data_dir of {term.id!r})"
+        )
     if not any(f"LOCK{SEP}{w}" in result.stdout for w in ("acquired", "takeover")):
         raise RemoteCommandError(host.id, result.returncode, result.stderr or "lock not taken")
     body_ok = False
