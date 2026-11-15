@@ -53,11 +53,19 @@ class VerifyReport:
     failed: tuple[str, ...] = ()
     trading_disabled: str | None = None
     """Why the account cannot trade, from the journal; ``None`` when it can."""
+    started: bool | None = None
+    """After mt5ctl started the terminal: whether the journal shows the start.
+    ``None`` when not checked (verifying a terminal that was already running)."""
+    errors: tuple[str, ...] = ()
+    """Error-level journal messages in the judged part of the journal."""
 
     @property
     def detail(self) -> str:
         conn = {True: "connected", False: "NOT connected", None: "connection unknown"}
-        parts = [f"service {self.service_state}", conn[self.connected]]
+        parts = [f"service {self.service_state}"]
+        if self.started is False:
+            parts.append("start not in the journal yet")
+        parts.append(conn[self.connected])
         if self.trading_disabled is not None:
             parts.append(f"TRADING DISABLED ({self.trading_disabled})")
         total = len(self.loaded) + len(self.pending) + len(self.failed)
@@ -65,6 +73,8 @@ class VerifyReport:
             parts.append(f"{len(self.loaded)}/{total} experts loaded")
         if self.failed:
             parts.append("failed: " + ", ".join(self.failed))
+        if self.errors:
+            parts.append(f"{len(self.errors)} error(s) in the journal")
         return "; ".join(parts)
 
 
@@ -77,6 +87,25 @@ class DeployResult:
     """Backup of the managed files taken before the apply; ``None`` when nothing
     was replaced (first deploy, or no changes)."""
     verify: VerifyReport | None = None
+    stop_result: str | None = None
+    """systemd's ``Result`` for the stop: ``success`` when the terminal closed
+    itself; ``None`` when the deploy did not stop it."""
+
+    @property
+    def stopped_cleanly(self) -> bool | None:
+        return None if self.stop_result is None else self.stop_result == "success"
+
+
+@dataclass(frozen=True, slots=True)
+class StopResult:
+    terminal: str
+    unit_result: str
+    """systemd's ``Result``: ``success`` when the terminal closed itself;
+    ``timeout``, ``signal`` and the like when systemd had to end it."""
+
+    @property
+    def clean(self) -> bool:
+        return self.unit_result == "success"
 
 
 @dataclass(frozen=True, slots=True)

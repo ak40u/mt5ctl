@@ -21,6 +21,8 @@ TOOLS = {
     "mt5_deploy": False,
     "mt5_adopt": False,
     "mt5_restart": False,
+    "mt5_start": False,
+    "mt5_stop": False,
     "mt5_compile": False,
 }
 

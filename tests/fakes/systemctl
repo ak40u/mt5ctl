@@ -5,6 +5,7 @@
 #   <unit>.on-start  executable run when the unit starts (terminal writing its journal)
 #   <unit>.fail-<action>         makes that action fail without doing it
 #   <unit>.fail-after-<action>   does the action, then reports failure (a dropped link)
+#   <unit>.result    the Result systemd reports for the last stop (default success)
 #   calls            one line per state-changing call
 set -u
 D="${FAKE_SYSTEMD:?}"
@@ -33,6 +34,7 @@ case "$cmd" in
     case "$prop" in
       User) cat "$D/$u.user" 2>/dev/null || true ;;
       ActiveEnterTimestampMonotonic) echo 0 ;;
+      Result) cat "$D/$u.result" 2>/dev/null || echo success ;;
       *) echo "" ;;
     esac ;;
   *) echo "fake systemctl: unsupported command $cmd" >&2; exit 2 ;;

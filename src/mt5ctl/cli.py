@@ -195,6 +195,39 @@ def _cmd_restart(args: argparse.Namespace) -> int:
     return EXIT_OK if result.verify.healthy else EXIT_UNHEALTHY
 
 
+def _cmd_start(args: argparse.Namespace) -> int:
+    registry = load_registry(args.config)
+    result = asyncio.run(
+        operations.start(
+            registry,
+            args.terminal,
+            confirm=args.confirm_live,
+            verify_timeout=args.verify_timeout,
+        )
+    )
+    _output(
+        args,
+        {"terminal": result.terminal, "verify": fmt.verify_payload(result.verify)},
+        fmt.restart_lines(result, verb="started"),
+    )
+    return EXIT_OK if result.verify.healthy else EXIT_UNHEALTHY
+
+
+def _cmd_stop(args: argparse.Namespace) -> int:
+    registry = load_registry(args.config)
+    result = asyncio.run(operations.stop(registry, args.terminal, confirm=args.confirm_live))
+    _output(
+        args,
+        {
+            "terminal": result.terminal,
+            "unit_result": result.unit_result,
+            "clean": result.clean,
+        },
+        fmt.stop_lines(result),
+    )
+    return EXIT_OK
+
+
 def _cmd_verify(args: argparse.Namespace) -> int:
     registry = load_registry(args.config)
     report = asyncio.run(operations.verify(registry, args.terminal, timeout=args.timeout))
@@ -329,6 +362,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     restart = with_verify(with_live(terminal_command("restart", "restart through systemd")))
     restart.set_defaults(func=_cmd_restart)
+
+    start = with_verify(with_live(terminal_command("start", "start through systemd")))
+    start.set_defaults(func=_cmd_start)
+
+    stop = with_live(terminal_command("stop", "stop through systemd and wait for the exit"))
+    stop.set_defaults(func=_cmd_stop)
 
     verify = terminal_command("verify", "check service, connection and loaded experts")
     verify.add_argument(

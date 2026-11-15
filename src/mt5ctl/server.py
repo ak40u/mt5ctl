@@ -29,7 +29,8 @@ Read-only: mt5_list (terminal ids), mt5_status, mt5_plan (what a deploy would ch
 mt5_verify, mt5_chart (read a local .chr file). Changing (terminals with env=live need
 confirm=true): mt5_deploy (apply a local bundle: stop, back up, apply, start, verify),
 mt5_adopt (record a bundle the terminal already runs, before the first deploy),
-mt5_restart, mt5_compile. Always run mt5_plan before mt5_deploy and show the plan.
+mt5_start, mt5_stop, mt5_restart, mt5_compile.
+Always run mt5_plan before mt5_deploy and show the plan.
 Bundles and sources are folders on the machine running this server, not on the host."""
 
 P = ParamSpec("P")
@@ -132,6 +133,24 @@ def build_server(config: str | None = None) -> MCPServer:
             tools.registry, terminal, confirm=confirm, verify_timeout=verify_timeout
         )
         return "\n".join(fmt.restart_lines(result))
+
+    @mcp.tool(annotations=CHANGES)
+    @_guard
+    async def mt5_start(
+        terminal: str, confirm: bool = False, verify_timeout: float | None = None
+    ) -> str:
+        """Start a terminal through systemd and wait until it is healthy."""
+        result = await operations.start(
+            tools.registry, terminal, confirm=confirm, verify_timeout=verify_timeout
+        )
+        return "\n".join(fmt.restart_lines(result, verb="started"))
+
+    @mcp.tool(annotations=CHANGES)
+    @_guard
+    async def mt5_stop(terminal: str, confirm: bool = False) -> str:
+        """Stop a terminal through systemd and wait until its process has exited."""
+        result = await operations.stop(tools.registry, terminal, confirm=confirm)
+        return "\n".join(fmt.stop_lines(result))
 
     @mcp.tool(annotations=READ_ONLY)
     @_guard

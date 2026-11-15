@@ -47,6 +47,7 @@ from .results import (
     CompileResult,
     DeployResult,
     RestartResult,
+    StopResult,
     TerminalStatus,
     VerifyReport,
 )
@@ -291,8 +292,26 @@ def expected_experts(experts: Iterable[str]) -> set[str]:
     return {mt5spec.expert_log_name(rel) for rel in experts}
 
 
-def evaluate_verify(st: TerminalStatus, journal: str, expected: set[str]) -> VerifyReport:
-    """Judge one health snapshot (pure)."""
+def journal_errors(text: str) -> tuple[str, ...]:
+    """Messages of the error-level lines (source column included)."""
+    out = []
+    for line in text.splitlines():
+        cols = line.split("\t")
+        if len(cols) > 3 and cols[mt5spec.JOURNAL_LEVEL_COLUMN] == mt5spec.JOURNAL_LEVEL_ERROR:
+            out.append("\t".join(cols[3:]).strip())
+    return tuple(out)
+
+
+def evaluate_verify(
+    st: TerminalStatus, journal: str, expected: set[str], *, require_start: bool = False
+) -> VerifyReport:
+    """Judge one health snapshot (pure).
+
+    With *require_start* (after mt5ctl started the terminal), the journal must
+    show the start: a unit that is "active" may still be a terminal that never
+    got going, and a terminal with no experts and an unknown connection would
+    otherwise pass on the service state alone.
+    """
     loaded = {
         m["name"].strip().lower() for m in mt5spec.LOG_EXPERT_LOADED_RE.finditer(journal)
     }
@@ -307,8 +326,12 @@ def evaluate_verify(st: TerminalStatus, journal: str, expected: set[str]) -> Ver
     failed = sorted(n for n in expected if n.lower() in failed_names)
     pending = sorted(n for n in expected if n not in ok_names and n not in failed)
     trading_disabled = journal_trading_disabled(journal) or st.trading_disabled
+    started = (
+        mt5spec.LOG_TERMINAL_STARTED_RE.search(journal) is not None if require_start else None
+    )
     healthy = (
         st.service_state == "active"
+        and started is not False
         and connected is not False
         and trading_disabled is None
         and not failed
@@ -322,6 +345,8 @@ def evaluate_verify(st: TerminalStatus, journal: str, expected: set[str]) -> Ver
         pending=tuple(pending),
         failed=tuple(failed),
         trading_disabled=trading_disabled,
+        started=started,
+        errors=journal_errors(journal),
     )
 
 
@@ -340,12 +365,13 @@ async def _verify(
     *,
     timeout: float,
     interval: float,
+    require_start: bool = False,
 ) -> VerifyReport:
     """Poll until healthy or *timeout*; report the last snapshot (never changes anything)."""
     deadline = time.monotonic() + timeout
     while True:
         st = (await status(registry, [term.id]))[0]
-        report = evaluate_verify(st, await journal(), expected)
+        report = evaluate_verify(st, await journal(), expected, require_start=require_start)
         if report.healthy or time.monotonic() + interval > deadline:
             return report
         await asyncio.sleep(interval)
@@ -406,15 +432,22 @@ async def _control(host: Host, term: Terminal, action: str) -> None:
         )
 
 
-async def _drain(host: Host, term: Terminal) -> None:
+async def _drain(host: Host, term: Terminal) -> str:
+    """Wait for the terminal process to be gone; return the unit's ``Result``.
+
+    ``success`` means the terminal closed itself (and saved its profile);
+    anything else means systemd had to end it.
+    """
     service = _require_service(term, "stop")
     script = scripts.build_drain_script(service, term.service_scope, DRAIN_TIMEOUT_S)
     result = await transport.run(host, script, check=False, timeout=DRAIN_TIMEOUT_S + 30)
-    if f"DRAIN{SEP}ok" not in result.stdout:
-        raise DeployError(
-            f"the terminal did not exit within {DRAIN_TIMEOUT_S}s of stop; nothing was "
-            "changed and it is being started again"
-        )
+    for fields in _lines(result.stdout, "DRAIN"):
+        if fields[:1] == ["ok"]:
+            return fields[1] if len(fields) > 1 and fields[1] else "unknown"
+    raise DeployError(
+        f"the terminal did not exit within {DRAIN_TIMEOUT_S}s of stop; nothing was "
+        "changed and it is being started again"
+    )
 
 
 def _holder() -> str:
@@ -494,6 +527,50 @@ async def restart(
             expected,
             timeout=timeout,
             interval=VERIFY_INTERVAL_S,
+            require_start=True,
+        )
+    return RestartResult(terminal=term.id, verify=report)
+
+
+async def stop(registry: Registry, terminal_id: str, *, confirm: bool = False) -> StopResult:
+    """Stop a terminal through systemd and wait until its process has exited."""
+    term = registry.terminal(terminal_id)
+    host = registry.host_of(term)
+    _require_live_confirmation(term, "stop", confirm)
+    _require_service(term, "stop")
+    async with _locked(host, term):
+        with anyio.CancelScope(shield=True):
+            await _control(host, term, "stop")
+            unit_result = await _drain(host, term)
+    return StopResult(terminal=term.id, unit_result=unit_result)
+
+
+async def start(
+    registry: Registry,
+    terminal_id: str,
+    *,
+    confirm: bool = False,
+    verify_timeout: float | None = None,
+) -> RestartResult:
+    """Start a terminal through systemd and wait until it is healthy."""
+    term = registry.terminal(terminal_id)
+    host = registry.host_of(term)
+    _require_live_confirmation(term, "start", confirm)
+    _require_service(term, "start")
+    timeout = _verify_window(verify_timeout, VERIFY_TIMEOUT_S)
+    async with _locked(host, term):
+        expected = await _live_experts(registry, term)
+        cursor = await _journal_cursor(host, term)
+        with anyio.CancelScope(shield=True):
+            await _control(host, term, "start")
+        report = await _verify(
+            registry,
+            term,
+            _since(host, term, cursor),
+            expected,
+            timeout=timeout,
+            interval=VERIFY_INTERVAL_S,
+            require_start=True,
         )
     return RestartResult(terminal=term.id, verify=report)
 
@@ -616,6 +693,7 @@ async def deploy(
 
     async with _locked(host, term):
         stop_requested = False
+        stop_result: str | None = None
         outcome: _ApplyOutcome | None = None
         cursor = JournalCursor("", 0)
         current = compute_plan(bundle, await collect_state(registry, term, bundle.files))
@@ -639,7 +717,7 @@ async def deploy(
             # and starting a unit that is already running does nothing.
             stop_requested = True
             await _control(host, term, "stop")
-            await _drain(host, term)
+            stop_result = await _drain(host, term)
             state = await collect_state(registry, term, bundle.files)
             current = compute_plan(bundle, state)
             if current.blocked:
@@ -671,6 +749,7 @@ async def deploy(
             expected_experts(bundle.chart_experts.values()),
             timeout=timeout,
             interval=interval,
+            require_start=True,
         )
     return DeployResult(
         terminal=term.id,
@@ -678,6 +757,7 @@ async def deploy(
         restarted=True,
         backup=outcome.backup if outcome else None,
         verify=report,
+        stop_result=stop_result,
     )
 
 

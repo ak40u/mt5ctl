@@ -609,3 +609,61 @@ def test_failed_apply_restores_the_order_file(
     with pytest.raises(DeployError, match="restored"):
         deploy(farm, bundle_v2(tmp_path / "v2"))
     assert (farm.data / ORDER).read_bytes() == before
+
+
+# -- start, stop, and what verify requires after a start --------------------- #
+
+
+def test_stop_then_start(farm: Farm) -> None:
+    farm.journal_on_start()
+    asyncio.run(operations.stop(farm.registry, "demo1"))
+    assert (farm.systemd / "mt5-demo1.service.state").read_text().strip() == "inactive"
+    result = asyncio.run(operations.start(farm.registry, "demo1", verify_timeout=2.0))
+    assert result.verify.healthy and result.verify.started is True
+    assert farm.calls == ["stop mt5-demo1.service", "start mt5-demo1.service"]
+    assert not lock_held(farm)
+
+
+def test_start_without_a_journaled_start_is_not_healthy(farm: Farm) -> None:
+    """A unit that is active but whose terminal never logged its start."""
+    farm.set_state("inactive")
+    result = asyncio.run(operations.start(farm.registry, "demo1", verify_timeout=0.3))
+    assert result.verify.started is False and not result.verify.healthy
+    assert "start not in the journal yet" in result.verify.detail
+
+
+def test_stop_live_needs_confirmation(farm: Farm) -> None:
+    farm.registry = make_registry(farm.data, env=Env.LIVE)
+    with pytest.raises(ConfirmationRequiredError):
+        asyncio.run(operations.stop(farm.registry, "demo1"))
+    assert farm.calls == []
+
+
+def test_journal_errors_are_reported() -> None:
+    st = TerminalStatus("t", "h", Env.DEMO, "active", connected=None)
+    journal = (
+        'QR\t2\t11:41:43.557\tTerminal\tcannot load config "cfg\\login.ini" at start\n'
+        "HJ\t0\t11:41:45.227\tTerminal\tMetaTrader 5 x64 build 6320 started\n"
+    )
+    report = operations.evaluate_verify(st, journal, set(), require_start=True)
+    assert report.started is True and report.healthy
+    assert report.errors == ('Terminal\tcannot load config "cfg\\login.ini" at start',)
+    assert "1 error(s) in the journal" in report.detail
+
+
+def test_stop_reports_a_clean_exit(farm: Farm) -> None:
+    result = asyncio.run(operations.stop(farm.registry, "demo1"))
+    assert result.clean and result.unit_result == "success"
+
+
+def test_unclean_stop_is_reported(farm: Farm, tmp_path: Path) -> None:
+    """systemd had to end the terminal (e.g. a modal dialog blocked closing)."""
+    (farm.systemd / "mt5-demo1.service.result").write_text("timeout\n")
+    result = asyncio.run(operations.stop(farm.registry, "demo1"))
+    assert not result.clean and result.unit_result == "timeout"
+    farm.journal_on_start("Trend")
+    deployed = deploy(farm, bundle_v1(tmp_path / "v1"))
+    assert deployed.stopped_cleanly is False
+    from mt5ctl.formatting import deploy_lines
+
+    assert any("did not close itself" in line for line in deploy_lines(deployed))

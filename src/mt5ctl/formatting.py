@@ -11,8 +11,14 @@ from .results import (
     CompileResult,
     DeployResult,
     RestartResult,
+    StopResult,
     TerminalStatus,
     VerifyReport,
+)
+
+UNCLEAN_STOP = (
+    "the terminal did not close itself and systemd ended it, so it may not have saved "
+    "its profile; check for a dialog it was showing, or a too short TimeoutStopSec"
 )
 
 
@@ -71,12 +77,15 @@ def deploy_lines(result: DeployResult) -> list[str]:
     lines = [f"deploy {result.terminal}:", *plan_lines(result.plan)]
     if result.backup:
         lines.append(f"backup: {result.backup}")
+    if result.stopped_cleanly is False:
+        lines.append(f"warning: {UNCLEAN_STOP} (Result={result.stop_result})")
     lines.append("restarted" if result.restarted else "not restarted (nothing changed)")
     if result.verify is not None:
         state = "healthy" if result.verify.healthy else "NOT healthy"
         lines.append(f"verify: {state} — {result.verify.detail}")
         if result.verify.pending:
             lines.append("  not loaded yet: " + ", ".join(result.verify.pending))
+        lines.extend(f"  journal error: {e}" for e in result.verify.errors[:5])
     return lines
 
 
@@ -144,9 +153,22 @@ def status_payload(rows: list[TerminalStatus]) -> list[dict[str, Any]]:
     return [asdict(st) | {"healthy": st.healthy} for st in rows]
 
 
-def restart_lines(result: RestartResult) -> list[str]:
+def restart_lines(result: RestartResult, verb: str = "restarted") -> list[str]:
     state = "healthy" if result.verify.healthy else "NOT healthy"
-    return [f"restarted {result.terminal}: {state} — {result.verify.detail}"]
+    lines = [f"{verb} {result.terminal}: {state} — {result.verify.detail}"]
+    if result.verify.pending:
+        lines.append("  not loaded yet: " + ", ".join(result.verify.pending))
+    lines.extend(f"  journal error: {e}" for e in result.verify.errors[:5])
+    return lines
+
+
+def stop_lines(result: StopResult) -> list[str]:
+    if result.clean:
+        return [f"stopped {result.terminal}"]
+    return [
+        f"stopped {result.terminal}, but not cleanly (Result={result.unit_result})",
+        f"warning: {UNCLEAN_STOP}",
+    ]
 
 
 def compile_lines(result: CompileResult) -> list[str]:

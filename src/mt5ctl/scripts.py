@@ -95,7 +95,9 @@ def build_drain_script(service: str, scope: ServiceScope, timeout_s: int) -> str
 
     The terminal writes chart files while it shuts down, so nothing may be
     written into the profile before the process is really gone. Prints
-    ``DRAIN|ok`` or ``DRAIN|timeout`` (exit 1).
+    ``DRAIN|ok|<unit Result>`` or ``DRAIN|timeout`` (exit 1). The unit's
+    ``Result`` tells a clean exit (``success``) from one systemd had to force
+    (``timeout``, ``signal``, ...).
     """
     names = "|".join(mt5spec.TERMINAL_PROCESS_NAMES)
     ctl = _systemctl(scope, mutate=False)
@@ -112,7 +114,10 @@ for _ in $(seq 1 {int(timeout_s)}); do
       case "$(cat /proc/$p/comm 2>/dev/null)" in {names}) busy=1; break ;; esac
     done
   fi
-  if [ "$busy" = 0 ]; then echo "DRAIN{SEP}ok"; exit 0; fi
+  if [ "$busy" = 0 ]; then
+    r=$({ctl} show -p Result --value "$SVC" 2>/dev/null)
+    echo "DRAIN{SEP}ok{SEP}${{r:-unknown}}"; exit 0
+  fi
   sleep 1
 done
 echo "DRAIN{SEP}timeout"

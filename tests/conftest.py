@@ -28,7 +28,9 @@ class Farm:
 
     def journal_on_start(self, *experts: str, authorized: bool = True) -> None:
         """On start, append UTF-16LE journal lines like the terminal's."""
-        lines = ["0\t12:00:00.000\tTerminal\tMetaTrader 5 x64 started"]
+        lines = [
+            "0\t12:00:00.000\tTerminal\tMetaTrader 5 x64 build 6320 started for MetaQuotes"
+        ]
         if authorized:
             lines.append("0\t12:00:01.000\tNetwork\t'1001': authorized on Broker-Demo")
         lines += [

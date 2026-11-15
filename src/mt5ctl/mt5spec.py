@@ -102,8 +102,12 @@ JOURNAL_GLOB = "*.log"
 #   Network   '<login>': connection to <server> lost
 #   Network   '<login>': disconnected from <server>      (on a normal exit)
 #   Network   '<login>': trading has been disabled - investor mode
-# The second column is the level: 0 information, 1 warning, 2 error.
+# The second column is the level: 0 information, 1 warning, 2 error. The
+# journal reaches the disk some seconds after the events (observed: about 13 s
+# after start), so a freshly started terminal may have no journal yet.
 # The failed-load line is MT4 heritage and has not been observed.
+JOURNAL_LEVEL_COLUMN = 1
+JOURNAL_LEVEL_ERROR = "2"
 LOG_TERMINAL_STARTED_RE = re.compile(r"MetaTrader 5 .*build \d+ started", re.IGNORECASE)
 LOG_AUTHORIZED_RE = re.compile(r"authorized on (\S+)", re.IGNORECASE)
 LOG_CONNECTION_LOST_RE = re.compile(
