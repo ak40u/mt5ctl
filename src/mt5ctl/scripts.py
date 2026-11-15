@@ -481,6 +481,71 @@ tailof() {{
 """
 
 
+# Tools the generated scripts need on every host, and those only some commands
+# need (the command is named in the check).
+DOCTOR_REQUIRED = ("bash", "tar", "base64", "awk", "sed", "mktemp", "tail", "wc")
+DOCTOR_OPTIONAL = {
+    "ss": "status attributes broker connections to each terminal",
+    "Xvfb": "login runs the terminal on a private display",
+    "iconv": "login reads the journal",
+    "shred": "login erases its temporary file (without it: zeros, then rm)",
+}
+
+
+def build_doctor_script(
+    specs: Iterable[tuple[str, str, str, ServiceScope, str, str, str]],
+) -> str:
+    """Check a host for what mt5ctl needs, read-only.
+
+    Each spec is ``(id, data dir, mode, scope, unit, wine, wine prefix)``, mode
+    ``systemd``, ``process`` or ``none``. Output::
+
+        TOOL|<name>|ok|missing
+        TERM|<id>|<dir>|<mql5>|<exe>|<unit>|<sudo>|<wine>|<prefix>|<journal>
+
+    each field ``ok``, ``missing``, or ``-`` when it does not apply; ``sudo`` is
+    ``root`` when the user is root.
+    """
+    tools = " ".join([*DOCTOR_REQUIRED, *DOCTOR_OPTIONAL, "systemctl", "sha256sum", "shasum"])
+    calls = "\n".join(
+        "checkterm "
+        + " ".join(sh_quote(str(v)) for v in (tid, d, mode, scope.value, svc, w, p))
+        for tid, d, mode, scope, svc, w, p in specs
+    )
+    return f"""\
+set +e
+for t in {tools}; do
+  if command -v "$t" >/dev/null 2>&1; then echo "TOOL{SEP}$t{SEP}ok"; else echo "TOOL{SEP}$t{SEP}missing"; fi
+done
+yn() {{ if "$@" >/dev/null 2>&1; then echo ok; else echo missing; fi; }}
+checkterm() {{
+  id=$1; dir=$2; mode=$3; scope=$4; svc=$5; wine=$6; wp=$7
+  d=$(yn test -d "$dir"); m=$(yn test -d "$dir/MQL5"); e=$(yn test -f "$dir/terminal64.exe")
+  u=-; s=-; w=-; p=-
+  if [ "$mode" = systemd ]; then
+    if [ "$scope" = user ]; then
+      u=$(yn systemctl --user cat "$svc")
+    else
+      u=$(yn systemctl cat "$svc")
+      if [ "$(id -u)" = 0 ]; then s=root
+      elif sudo -n -l systemctl start "$svc" >/dev/null 2>&1 \
+        && sudo -n -l systemctl stop "$svc" >/dev/null 2>&1 \
+        && sudo -n -l systemctl restart "$svc" >/dev/null 2>&1; then s=ok
+      else s=missing; fi
+    fi
+  fi
+  if [ -n "$wine" ]; then
+    case "$wine" in */*) w=$(yn test -x "$wine") ;; *) w=$(yn command -v "$wine") ;; esac
+  fi
+  [ -n "$wp" ] && p=$(yn test -f "$wp/system.reg")
+  j=missing
+  for f in "$dir"/{_JOURNAL}; do [ -f "$f" ] && j=ok && break; done
+  echo "TERM{SEP}$id{SEP}$d{SEP}$m{SEP}$e{SEP}$u{SEP}$s{SEP}$w{SEP}$p{SEP}$j"
+}}
+{calls}
+"""
+
+
 def build_log_cursor_script(data_dir: str) -> str:
     """Remember where the journal ends now: ``CURSOR|<b64 file name>|<size>``.
 

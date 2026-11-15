@@ -146,6 +146,15 @@ class RestartResult:
 
 
 @dataclass(frozen=True, slots=True)
+class Check:
+    """One line of ``doctor``: ``ok``, ``warn`` (works, with less) or ``fail``."""
+
+    label: str
+    status: str
+    detail: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class TerminalInfo:
     """What the journal tells about a terminal's latest session."""
 

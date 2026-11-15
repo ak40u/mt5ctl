@@ -87,6 +87,13 @@ def build_server(config: str | None = None) -> MCPServer:
 
     @mcp.tool(annotations=READ_ONLY)
     @_guard
+    async def mt5_doctor() -> str:
+        """Check every host and terminal for what mt5ctl needs: tools, units and
+        sudo rules, data folders, Wine, journals, and broker connections."""
+        return "\n".join(fmt.doctor_lines(await operations.doctor(tools.registry)))
+
+    @mcp.tool(annotations=READ_ONLY)
+    @_guard
     async def mt5_info(terminal: str = "all") -> str:
         """Build, account, server, access point, broker company, open positions and
         orders, and the start file of one or all terminals, from their journals."""

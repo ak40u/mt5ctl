@@ -26,6 +26,7 @@ TOOLS = {
     "mt5_compile": False,
     "mt5_login": False,
     "mt5_info": True,
+    "mt5_doctor": True,
     "mt5_logs": True,
 }
 

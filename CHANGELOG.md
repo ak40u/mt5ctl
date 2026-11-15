@@ -51,6 +51,8 @@ All notable changes to this project are documented here. The format follows
   stdin, the environment or a private credentials file; the temporary start
   file is shredded and the terminal started again and verified. Terminals take
   an `account` setting.
+- `doctor` (CLI and MCP): tools on each host, units and their sudo rules,
+  data folders, Wine and its prefix, journals and broker connections, read-only.
 - `info` (build, account, server, access point, broker, positions and orders,
   start file) and `logs` (journal or experts' log, with `--grep`), CLI and MCP.
 - CLI: `chart show`, `bundle check`, `plan`, `list`, `deploy`, `adopt`, `status`,

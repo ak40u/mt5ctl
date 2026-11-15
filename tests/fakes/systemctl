@@ -37,6 +37,9 @@ case "$cmd" in
     fi
     [ -f "$D/$u.fail-after-$cmd" ] && { echo "fake: connection lost" >&2; exit 255; }
     exit 0 ;;
+  cat)
+    [ -f "$D/$1.missing" ] && { echo "No files found for $1." >&2; exit 1; }
+    echo "[Unit]" ;;
   show)
     prop="$2"; u="$4"
     case "$prop" in

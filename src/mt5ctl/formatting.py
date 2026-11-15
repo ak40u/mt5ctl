@@ -8,6 +8,7 @@ from typing import Any
 from .reconcile import DeployPlan
 from .results import (
     AdoptResult,
+    Check,
     CompileResult,
     DeployResult,
     LoginResult,
@@ -185,6 +186,20 @@ def stop_lines(result: StopResult) -> list[str]:
         f"(systemd Result={result.unit_result})",
         f"warning: {UNCLEAN_STOP}",
     ]
+
+
+def doctor_lines(checks: list[Check]) -> list[str]:
+    glyph = {"ok": "ok  ", "warn": "WARN", "fail": "FAIL"}
+    width = max((len(c.label) for c in checks), default=0)
+    lines = [
+        f"{glyph.get(c.status, '?')}  {c.label:<{width}}  {c.detail}".rstrip() for c in checks
+    ]
+    fails = sum(c.status == "fail" for c in checks)
+    warns = sum(c.status == "warn" for c in checks)
+    lines.append(
+        "all checks passed" if not fails and not warns else f"{fails} failed, {warns} warnings"
+    )
+    return lines
 
 
 def journal_line(raw: str) -> str:

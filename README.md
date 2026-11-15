@@ -213,7 +213,7 @@ Any other MCP client:
 
 | Tool | Changes state |
 |---|---|
-| `mt5_list`, `mt5_status`, `mt5_info`, `mt5_logs`, `mt5_plan`, `mt5_verify`, `mt5_chart` | no |
+| `mt5_list`, `mt5_status`, `mt5_doctor`, `mt5_info`, `mt5_logs`, `mt5_plan`, `mt5_verify`, `mt5_chart` | no |
 | `mt5_deploy`, `mt5_adopt`, `mt5_start`, `mt5_stop`, `mt5_restart`, `mt5_compile`, `mt5_login` | yes |
 
 Then ask, for example: *"Plan deploying bundles/demo1 to demo1 and show me the
@@ -230,6 +230,7 @@ midway, the terminal is still started again and the lock released.
 | `plan <terminal> <bundle>` | what a deploy would change | no |
 | `status [terminal…]` | service state, terminal process, broker connection, journal age | no |
 | `verify <terminal>` | service, connection, every chart's expert loaded | no |
+| `doctor` | check every host and terminal: tools, unit and sudo rule, data folder, Wine, journal, broker connection | no |
 | `info [terminal…]` | build, account, server, access point, broker, open positions and orders, start file: from the journal's latest session | no |
 | `logs <terminal> [-n N] [--grep RE] [--experts]` | the end of the newest journal, or of the experts' log (`Print` output) | no |
 | `deploy <terminal> <bundle>` | apply a bundle | yes |

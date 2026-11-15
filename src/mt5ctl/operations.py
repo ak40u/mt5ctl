@@ -26,7 +26,7 @@ from pathlib import Path, PurePosixPath
 import anyio
 
 from . import mt5spec, scripts, transport
-from .auth import resolve_password
+from .auth import resolve_password, secrets_file
 from .bundle import (
     EXPERTS_DIR,
     Bundle,
@@ -48,6 +48,7 @@ from .models import Env, Host, HostKind, Registry, Terminal
 from .reconcile import DeployPlan, TerminalState, compute_plan
 from .results import (
     AdoptResult,
+    Check,
     CompileResult,
     DeployResult,
     LoginResult,
@@ -1129,6 +1130,140 @@ async def info(
     )
     found = {i.terminal: i for group in groups for i in group}
     return [found[i] for i in ids]
+
+
+# --------------------------------------------------------------------------- #
+# Doctor
+# --------------------------------------------------------------------------- #
+
+
+def _credentials_check() -> Check:
+    path = secrets_file()
+    if not path.is_file():
+        return Check("credentials file", "ok", f"none ({path})")
+    if os.name == "posix" and path.stat().st_mode & 0o077:
+        return Check("credentials file", "fail", f"{path} is readable by others: chmod 600")
+    return Check("credentials file", "ok", str(path))
+
+
+def _mode(term: Terminal) -> str:
+    return "systemd" if term.service else "process" if term.start_command else "none"
+
+
+async def _doctor_host(host: Host, terms: list[Terminal]) -> list[Check]:
+    specs = [
+        (
+            t.id,
+            t.data_dir,
+            _mode(t),
+            t.service_scope,
+            t.service or "",
+            t.wine if (t.wineprefix or t.wine != "wine") else "",
+            t.wineprefix or "",
+        )
+        for t in terms
+    ]
+    try:
+        result = await transport.run(host, scripts.build_doctor_script(specs), timeout=60)
+    except RemoteCommandError as exc:
+        return [Check(f"host {host.id}", "fail", f"unreachable: {exc}")]
+    tools = {f[0]: f[1] for f in _lines(result.stdout, "TOOL") if len(f) >= 2}
+    if not tools:
+        return [Check(f"host {host.id}", "fail", "the check printed nothing")]
+    missing = [t for t in scripts.DOCTOR_REQUIRED if tools.get(t) != "ok"]
+    if tools.get("sha256sum") != "ok" and tools.get("shasum") != "ok":
+        missing.append("sha256sum (or shasum)")
+    if any(_mode(t) == "systemd" for t in terms) and tools.get("systemctl") != "ok":
+        missing.append("systemctl")
+    checks = [
+        Check(
+            f"host {host.id}",
+            "fail" if missing else "ok",
+            "missing: " + ", ".join(missing) if missing else "reachable, tools present",
+        )
+    ]
+    for tool, why in scripts.DOCTOR_OPTIONAL.items():
+        if tools.get(tool) != "ok":
+            checks.append(Check(f"host {host.id}: {tool}", "warn", f"not installed; {why}"))
+    rows = {f[0]: f[1:] for f in _lines(result.stdout, "TERM") if len(f) >= 9}
+    for term in terms:
+        row = rows.get(term.id)
+        if row is None:
+            checks.append(Check(f"terminal {term.id}", "fail", "not reported by the check"))
+            continue
+        d, m, e, u, s, w, p, j = row[:8]
+        fails, warns = [], []
+        if d != "ok":
+            fails.append(f"no data folder {term.data_dir}")
+        elif m != "ok":
+            fails.append("no MQL5 folder in the data folder")
+        if d == "ok" and e != "ok":
+            warns.append("no terminal64.exe in the data folder (not a /portable install?)")
+        mode = _mode(term)
+        if mode == "none":
+            warns.append("no service or start_command: read-only commands only")
+        if u == "missing":
+            fails.append(f"unit {term.service} not found")
+        if s == "missing":
+            fails.append(
+                f"no password-less sudo for systemctl start|stop|restart {term.service}"
+            )
+        if w == "missing":
+            fails.append(f"wine {term.wine} not found")
+        if p == "missing":
+            fails.append(f"no Wine prefix at {term.wineprefix}")
+        if d == "ok" and j != "ok":
+            warns.append("no journal yet (never started?)")
+        status = "fail" if fails else "warn" if warns else "ok"
+        detail = "; ".join(fails + warns) or (
+            f"{mode}"
+            + (" (sudo ok)" if s == "ok" else "")
+            + ", data folder and journal present"
+        )
+        checks.append(Check(f"terminal {term.id}", status, detail))
+    return checks
+
+
+async def doctor(registry: Registry) -> list[Check]:
+    """Check what mt5ctl needs, everywhere, read-only: hosts, terminals, connections."""
+    checks = [
+        Check(
+            "registry",
+            "ok",
+            f"{len(registry.terminals)} terminals on {len(registry.hosts)} hosts",
+        ),
+        _credentials_check(),
+    ]
+    by_host: dict[str, list[Terminal]] = {h: [] for h in registry.hosts}
+    for term in registry.terminals.values():
+        by_host.setdefault(term.host, []).append(term)
+    groups = await asyncio.gather(
+        *(_doctor_host(registry.hosts[h], ts) for h, ts in by_host.items())
+    )
+    for group in groups:
+        checks.extend(group)
+    reachable = [
+        t.id
+        for t in registry.terminals.values()
+        if t.supervised
+        and not any(c.label == f"host {t.host}" and c.status == "fail" for c in checks)
+    ]
+    if reachable:
+        rows = await status(registry, reachable)
+        running = [r for r in rows if r.service_state == "active"]
+        down = [r.terminal for r in running if r.connected is False]
+        if down:
+            checks.append(
+                Check(
+                    "broker connections", "warn", "running, not connected: " + ", ".join(down)
+                )
+            )
+        else:
+            n = sum(r.connected is True for r in running)
+            checks.append(
+                Check("broker connections", "ok", f"{n} of {len(running)} running connected")
+            )
+    return checks
 
 
 # --------------------------------------------------------------------------- #

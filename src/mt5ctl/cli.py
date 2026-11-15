@@ -248,6 +248,13 @@ def _cmd_compile(args: argparse.Namespace) -> int:
     return EXIT_OK if result.ok else EXIT_ERROR
 
 
+def _cmd_doctor(args: argparse.Namespace) -> int:
+    registry = load_registry(args.config)
+    checks = asyncio.run(operations.doctor(registry))
+    _output(args, [asdict(c) for c in checks], fmt.doctor_lines(checks))
+    return EXIT_ERROR if any(c.status == "fail" for c in checks) else EXIT_OK
+
+
 def _cmd_logs(args: argparse.Namespace) -> int:
     registry = load_registry(args.config)
     result = asyncio.run(
@@ -404,6 +411,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     status.add_argument("terminals", nargs="*", metavar="terminal", help="default: all")
     status.set_defaults(func=_cmd_status)
+
+    doctor = with_config(
+        with_json(sub.add_parser("doctor", help="check hosts, units, folders and connections"))
+    )
+    doctor.set_defaults(func=_cmd_doctor)
 
     info = with_config(
         with_json(
