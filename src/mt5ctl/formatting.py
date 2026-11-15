@@ -38,6 +38,10 @@ def plan_lines(plan: DeployPlan) -> list[str]:
     ):
         lines.extend(f"  {marker} {p}" for p in paths)
     lines.extend(f"  ! gap: no {name}" for name in plan.gaps)
+    lines.extend(
+        f"  ! renumbered: {a.rsplit('/', 1)[-1]} is now {b.rsplit('/', 1)[-1]}"
+        for a, b in plan.renumbered
+    )
     lines.extend(f"  keep {p} (still used by a remaining chart)" for p in plan.keep)
     lines.extend(f"  foreign {p} (not managed, left alone)" for p in plan.foreign)
     if plan.order is not None and plan.has_changes:
@@ -55,6 +59,8 @@ def plan_lines(plan: DeployPlan) -> list[str]:
             problems.append(f"{len(plan.conflicts)} conflict(s)")
         if plan.gaps:
             problems.append(f"{len(plan.gaps)} numbering gap(s)")
+        if plan.renumbered:
+            problems.append("charts renumbered by the terminal")
         summary += "; BLOCKED by " + " and ".join(problems)
     elif not plan.has_changes:
         summary += "; nothing to do"

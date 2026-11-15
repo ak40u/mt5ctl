@@ -276,7 +276,10 @@ bundles/demo1/
 - Number charts so that, together with the foreign charts on the terminal, they
   run `chart01`, `chart02`, … without gaps. The terminal closes gaps itself when
   it saves the profile, which would move a managed chart to another file name,
-  so a deploy that would leave a gap is refused.
+  so a deploy that would leave a gap is refused. A chart closed by hand makes the
+  terminal renumber the rest; mt5ctl notices (it records the whole layout) and
+  refuses until the bundle matches and the terminal is adopted again
+  ([docs/deploy.md](docs/deploy.md#chart-numbering)).
 - `bundle check` warns about charts whose expert has "Allow Algo Trading"
   unticked: they load, but do not trade.
 - Anything else in the folder (sources, notes, logs) is ignored. Symlinks,

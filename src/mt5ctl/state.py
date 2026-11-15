@@ -103,6 +103,10 @@ def assemble_state(
         charts=refs,
         unresolved_charts=frozenset(unresolved),
         order=parse_order(order) if order is not None else None,
+        chart_digests={
+            rel: chart_digest(chart) if chart is not None else None
+            for rel, chart in parsed.items()
+        },
     )
 
 

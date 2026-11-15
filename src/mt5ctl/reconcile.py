@@ -24,6 +24,7 @@ Rules (managed-subset reconcile):
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
@@ -49,6 +50,8 @@ class TerminalState:
             expert removal.
         order: the chart names in the profile's order file, ``None`` when the
             file is absent.
+        chart_digests: every live chart of the profile mapped to its digest
+            (what it trades), ``None`` when it could not be read.
     """
 
     manifest: Manifest | None = None
@@ -56,6 +59,28 @@ class TerminalState:
     charts: Mapping[str, str | None] = field(default_factory=dict)
     unresolved_charts: frozenset[str] = frozenset()
     order: tuple[str, ...] | None = None
+    chart_digests: Mapping[str, str | None] = field(default_factory=dict)
+
+
+def chart_moves(
+    before: Mapping[str, str | None], after: Mapping[str, str | None]
+) -> tuple[tuple[str, str], ...]:
+    """``(old name, new name)`` for each chart now found under another file name.
+
+    A chart is followed by its digest (what it trades), and only when that
+    digest is unique on both sides: two identical charts cannot be told apart.
+    This is how a renumbering by the terminal shows (it closes gaps in the
+    numbering when it saves the profile).
+    """
+    seen_before = Counter(d for d in before.values() if d)
+    seen_after = Counter(d for d in after.values() if d)
+    where_after = {d: p for p, d in after.items() if d}
+    moves = []
+    for path, d in sorted(before.items()):
+        if not d or seen_before[d] != 1 or seen_after[d] != 1 or after.get(path) == d:
+            continue
+        moves.append((path, where_after[d]))
+    return tuple(moves)
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +102,9 @@ class DeployPlan:
     order: tuple[str, ...] | None = None
     """The profile's new window order, when the deploy changes it; written along
     with the other changes (it never causes a deploy on its own)."""
+    renumbered: tuple[tuple[str, str], ...] = ()
+    """Charts the terminal moved to another file name since the last deploy
+    (see :func:`chart_moves`); any blocks the deploy."""
 
     @property
     def has_changes(self) -> bool:
@@ -84,7 +112,7 @@ class DeployPlan:
 
     @property
     def blocked(self) -> bool:
-        return bool(self.conflicts or self.gaps)
+        return bool(self.conflicts or self.gaps or self.renumbered)
 
 
 def compute_plan(bundle: Bundle, state: TerminalState) -> DeployPlan:
@@ -175,6 +203,18 @@ def compute_plan(bundle: Bundle, state: TerminalState) -> DeployPlan:
             "chart01, chart02, ... without holes"
         )
     order = _next_order(state, [*bundle_charts, *foreign])
+    renumbered = (
+        chart_moves(manifest.charts, state.chart_digests)
+        if manifest is not None and manifest.charts is not None
+        else ()
+    )
+    if renumbered:
+        notes.append(
+            "the terminal renumbered its charts since the last deploy ("
+            + ", ".join(f"{_name(a)} is now {_name(b)}" for a, b in renumbered)
+            + "): deploying by file name would overwrite or duplicate charts; make the "
+            "bundle's numbering match the terminal's and run adopt, then deploy"
+        )
     return DeployPlan(
         add=tuple(add),
         update=tuple(update),
@@ -186,7 +226,12 @@ def compute_plan(bundle: Bundle, state: TerminalState) -> DeployPlan:
         notes=tuple(notes),
         gaps=tuple(gaps),
         order=order,
+        renumbered=renumbered,
     )
+
+
+def _name(path: str) -> str:
+    return path.rsplit("/", 1)[-1]
 
 
 def _numbering_gaps(charts: list[str]) -> list[str]:

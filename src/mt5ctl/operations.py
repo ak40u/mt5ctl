@@ -49,7 +49,7 @@ from .errors import (
 )
 from .manifest import MANIFEST_RELPATH, Manifest
 from .models import Env, Host, HostKind, Registry, Terminal
-from .reconcile import DeployPlan, TerminalState, compute_plan
+from .reconcile import DeployPlan, TerminalState, chart_moves, compute_plan
 from .results import (
     AdoptResult,
     ChartExpert,
@@ -814,6 +814,16 @@ def _conflict_message(plan: DeployPlan) -> str:
             + ", ".join(plan.gaps)
             + " missing) — the terminal would renumber the charts after them"
         )
+    if plan.renumbered:
+        reasons.append(
+            "the terminal renumbered its charts since the last deploy ("
+            + ", ".join(
+                f"{a.rsplit('/', 1)[-1]} is now {b.rsplit('/', 1)[-1]}"
+                for a, b in plan.renumbered
+            )
+            + ") — deploying by file name would overwrite or duplicate charts; make the "
+            "bundle's numbering match the terminal's, run adopt, then deploy"
+        )
     return "; ".join(reasons)
 
 
@@ -856,7 +866,16 @@ def next_manifest(bundle: Bundle, plan: DeployPlan, state: TerminalState) -> Man
     files = dict(bundle.files)
     previous = state.manifest.files if state.manifest else {}
     files.update({p: previous[p] for p in plan.keep if p in previous})
-    return Manifest(profile=bundle.profile, files=files)
+    return Manifest(
+        profile=bundle.profile, files=files, charts=chart_layout(bundle, plan, state)
+    )
+
+
+def chart_layout(bundle: Bundle, plan: DeployPlan, state: TerminalState) -> dict[str, str]:
+    """The profile's charts after applying *plan*: the bundle's and the foreign ones."""
+    layout = {p: bundle.files[p] for p in bundle.charts}
+    layout.update({p: d for p in plan.foreign if (d := state.chart_digests.get(p))})
+    return layout
 
 
 @dataclass(frozen=True, slots=True)
@@ -907,7 +926,8 @@ async def deploy(
         stop_result: StopResult | None = None
         outcome: _ApplyOutcome | None = None
         cursor = JournalCursor("", 0)
-        current = compute_plan(bundle, await collect_state(registry, term, bundle.files))
+        before = await collect_state(registry, term, bundle.files)
+        current = compute_plan(bundle, before)
         if current.blocked:
             raise DeployError(_conflict_message(current))
         if not current.has_changes:
@@ -938,6 +958,18 @@ async def deploy(
             stop_requested = True
             stop_result = await _stop_and_drain(host, term)
             state = await collect_state(registry, term, bundle.files)
+            moved = chart_moves(before.chart_digests, state.chart_digests)
+            if moved:
+                raise DeployError(
+                    "the terminal renumbered its charts while it shut down ("
+                    + ", ".join(
+                        f"{a.rsplit('/', 1)[-1]} is now {b.rsplit('/', 1)[-1]}"
+                        for a, b in moved
+                    )
+                    + "); nothing was changed and the terminal was started again. A chart "
+                    "was probably closed in the terminal: make the bundle's numbering match "
+                    "the terminal's (mt5ctl ea-list shows it), run adopt, then deploy"
+                )
             current = compute_plan(bundle, state)
             if current.blocked:
                 raise DeployError(_conflict_message(current))
@@ -1006,7 +1038,9 @@ async def _apply(
     manifest = next_manifest(bundle, plan, state)
     manifest_json = manifest.to_json()
     previous = state.manifest.files if state.manifest else {}
-    interim = Manifest(profile=bundle.profile, files={**previous, **manifest.files})
+    interim = Manifest(
+        profile=bundle.profile, files={**previous, **manifest.files}, charts=manifest.charts
+    )
     try:
         await transport.put_tar(host, tar_bytes, f"{term.data_dir}/{staging}")
         await transport.run(
@@ -1104,7 +1138,11 @@ async def adopt(
             host,
             scripts.build_manifest_put_script(
                 term.data_dir,
-                Manifest(profile=bundle.profile, files=recorded).to_json(),
+                Manifest(
+                    profile=bundle.profile,
+                    files=recorded,
+                    charts={p: d for p, d in state.chart_digests.items() if d},
+                ).to_json(),
                 unit_user,
             ),
         )

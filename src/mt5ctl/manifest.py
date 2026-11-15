@@ -2,7 +2,12 @@
 
 Stored as ``<data dir>/.mt5ctl/deployed.json``::
 
-    {"version": 1, "profile": "Default", "files": {"<relpath>": "<digest>", ...}}
+    {"version": 1, "profile": "Default", "files": {"<relpath>": "<digest>", ...},
+     "charts": {"<chart relpath>": "<digest>", ...}}
+
+``charts`` (optional) is the profile's chart layout after the deploy, foreign
+charts included: it is how a later run notices that the terminal renumbered
+its charts in the meantime (it closes gaps when it saves the profile).
 
 The manifest is what makes deploys *managed-subset*: mt5ctl only ever updates or
 removes paths listed here, so charts and experts installed by hand or by
@@ -32,17 +37,20 @@ class Manifest:
     profile: str
     files: Mapping[str, str]
     """Managed relative path -> digest recorded when it was placed."""
+    charts: Mapping[str, str] | None = None
+    """Every chart of the profile after the deploy (foreign ones too) -> its
+    digest; ``None`` in a manifest written before this was recorded."""
 
     def to_json(self) -> str:
         """Canonical serialization (sorted keys), the inverse of :func:`parse_manifest`."""
-        return json.dumps(
-            {
-                "version": MANIFEST_VERSION,
-                "profile": self.profile,
-                "files": dict(sorted(self.files.items())),
-            },
-            separators=(",", ":"),
-        )
+        data: dict[str, object] = {
+            "version": MANIFEST_VERSION,
+            "profile": self.profile,
+            "files": dict(sorted(self.files.items())),
+        }
+        if self.charts is not None:
+            data["charts"] = dict(sorted(self.charts.items()))
+        return json.dumps(data, separators=(",", ":"))
 
 
 def parse_manifest(raw: str | None) -> Manifest | None:
@@ -65,14 +73,20 @@ def parse_manifest(raw: str | None) -> Manifest | None:
         raise ManifestError("deployed.json is corrupt (profile or files has the wrong type)")
     if not all(isinstance(k, str) and isinstance(v, str) for k, v in files.items()):
         raise ManifestError("deployed.json is corrupt (files is not a path -> digest map)")
+    charts = data.get("charts")
+    if charts is not None and (
+        not isinstance(charts, dict)
+        or not all(isinstance(k, str) and isinstance(v, str) for k, v in charts.items())
+    ):
+        raise ManifestError("deployed.json is corrupt (charts is not a path -> digest map)")
     # Every path is checked against the managed layout: a deploy removes managed
     # paths, so an entry like "../x" must never reach a remove or chown.
     try:
         validate_profile(profile)
-        for path in files:
+        for path in [*files, *(charts or {})]:
             validate_member(path, profile)
     except BundleError as exc:
         raise ManifestError(
             f"deployed.json lists a path outside the managed layout: {exc}"
         ) from None
-    return Manifest(profile=profile, files=files)
+    return Manifest(profile=profile, files=files, charts=charts)

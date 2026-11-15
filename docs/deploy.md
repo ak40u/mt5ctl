@@ -106,6 +106,19 @@ refuses, and the fix is to renumber the bundle. Removing a chart from the middle
 counts too: to drop `chart02` while a foreign `chart03` stays, move another of
 your charts into `chart02`, or give that slot a chart without an expert.
 
+Gaps can also come from the terminal side: a chart closed by hand makes the
+terminal renumber the charts after it at its next save. A deploy goes by file
+name, so after that it would overwrite the chart that moved into a managed
+slot, or run a moved strategy twice. To catch this, the manifest records the
+profile's whole chart layout after each deploy, foreign charts included, by
+what each chart trades. If a chart is found under another number since, `plan`
+shows `! renumbered: chart02.chr is now chart01.chr` and `deploy` refuses
+before stopping the terminal; if the terminal renumbers while it shuts down for
+the deploy, nothing is applied and it is started again. The fix in both cases:
+make the bundle's numbering match the terminal's (`mt5ctl ea-list` shows it),
+run `adopt`, then deploy. Two identical charts cannot be told apart, so a move
+between them is not noticed (and changes nothing either).
+
 ## systemd unit
 
 mt5ctl needs one unit per terminal. A system unit for Wine with its own virtual
