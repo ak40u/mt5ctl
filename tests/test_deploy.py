@@ -378,7 +378,9 @@ def test_evaluate_verify_flags_failed_experts() -> None:
     journal = (
         "authorized on Broker\n"
         "expert Trend (EURUSD,H4) loaded successfully\n"
-        "expert Breakout (GBPUSD,H1) initializing of Breakout failed with error 32767\n"
+        "expert Breakout (GBPUSD,H1) loaded successfully\n"
+        "initializing of Breakout (GBPUSD,H1) failed with code 1\n"
+        "expert Breakout (GBPUSD,H1) removed\n"
     )
     report = operations.evaluate_verify(st, journal, {"Trend", "Breakout", "Missing"})
     assert report.loaded == ("Trend",)

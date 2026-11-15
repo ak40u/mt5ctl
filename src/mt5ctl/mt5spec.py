@@ -32,14 +32,16 @@ CHART_NEWLINE = "\r\n"
 CHART_FINAL_NEWLINE = False
 
 # How a chart stores its timeframe: (period_type, period_size). The unit is
-# minutes (0) or hours (1); a day is 24 hours.
-# Observed (build 6320): M30 = (0, 30), H1 = (1, 1), H4 = (1, 4), D1 = (1, 24).
-# The other minute and hour timeframes follow the same scheme. W1 and MN1 have
-# not been observed, so mt5ctl neither reads nor writes them.
+# minutes (0), hours (1; a day is 24 hours), weeks (2) or months (3).
+# Observed (build 6320): M30 = (0, 30), H1 = (1, 1), H4 = (1, 4), D1 = (1, 24),
+# W1 = (2, 1), MN1 = (3, 1). The other minute and hour timeframes follow the
+# same scheme.
 PERIOD_CODES: dict[str, tuple[int, int]] = {
     **{f"M{n}": (0, n) for n in (1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30)},
     **{f"H{n}": (1, n) for n in (1, 2, 3, 4, 6, 8, 12)},
     "D1": (1, 24),
+    "W1": (2, 1),
+    "MN1": (3, 1),
 }
 
 # A chart's expert: an <expert> block directly in <chart>, before the first
@@ -112,7 +114,13 @@ JOURNAL_GLOB = "[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9].log"
 # The second column is the level: 0 information, 1 warning, 2 error. The
 # journal reaches the disk some seconds after the events (observed: about 13 s
 # after start), so a freshly started terminal may have no journal yet.
-# The failed-load line is MT4 heritage and has not been observed.
+# An expert that cannot be loaded or initialised (observed, build 6320):
+#   Experts   loading of <name> (<symbol>,<period>) failed [533]       (damaged .ex5)
+#   Experts   expert <name> (...) loaded successfully, then
+#   Experts   initializing of <name> (...) failed with code 1         (OnInit failed)
+#   Experts   expert <name> (...) removed
+# A file of random bytes named .ex5 logs nothing at all; it simply never loads.
+# The terminal then saves that chart without its <expert> block.
 # The terminal's own exit line: it closed itself (and saved its profile).
 # Observed (build 6320): "Terminal  exit with code 0", then "stopped with 0" and
 # "shutdown with 0". A terminal ended by a signal writes none of them. systemd's
@@ -136,8 +144,7 @@ LOG_EXPERT_LOADED_RE = re.compile(
     re.IGNORECASE,
 )
 LOG_EXPERT_FAILED_RE = re.compile(
-    r"expert (?P<name>.+?) \([^)]*\).*(?:failed|cannot load|initializing.*error)",
-    re.IGNORECASE,
+    r"(?:loading|initializing) of (?P<name>.+?) \([^)]*\) failed", re.IGNORECASE
 )
 
 

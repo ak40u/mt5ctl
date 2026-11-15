@@ -257,3 +257,16 @@ def test_order_unchanged_is_none() -> None:
 
 def test_no_charts_no_order_file() -> None:
     assert compute_plan(bundle({A: "sha256:a"}), state()).order is None
+
+
+def test_chart_saved_without_its_expert_is_explained() -> None:
+    plan = compute_plan(
+        bundle({C1: "chart:1", A: "sha256:a"}, {C1: A}),
+        state(
+            manifest={C1: "chart:1", A: "sha256:a"},
+            files={C1: "chart:stripped", A: "sha256:a"},
+            charts={C1: None},
+        ),
+    )
+    assert plan.update == (C1,)
+    assert any("without its expert" in n for n in plan.notes)

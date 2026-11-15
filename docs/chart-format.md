@@ -63,7 +63,7 @@ name=Main
 | Key | Where | Meaning |
 |---|---|---|
 | `symbol` | `<chart>` | the chart's symbol |
-| `period_type`, `period_size` | `<chart>` | the timeframe: `period_size` counts minutes (`period_type=0`) or hours (`1`); see the table below |
+| `period_type`, `period_size` | `<chart>` | the timeframe: `period_size` counts minutes (`period_type=0`), hours (`1`), weeks (`2`) or months (`3`); see the table below |
 | `name` | `<expert>` | the expert's display name |
 | `path` | `<expert>` | the expert's file, relative to `MQL5`, with backslashes |
 | `expertmode` | `<expert>` | the expert's permission flags, kept as a number |
@@ -77,9 +77,11 @@ Timeframe codes observed on build 6320:
 | H1 | 1 | 1 |
 | H4 | 1 | 4 |
 | D1 | 1 | 24 |
+| W1 | 2 | 1 |
+| MN1 | 3 | 1 |
 
-The other minute and hour timeframes follow the same scheme. W1 and MN1 have
-not been observed yet, so mt5ctl does not read or write them.
+`period_type` is the unit — minutes (0), hours (1), weeks (2), months (3) — and
+a day is 24 hours. The other minute and hour timeframes follow the same scheme.
 
 The `<expert>` block (observed on build 6320, with an expert attached in the
 terminal and saved on a normal exit) sits directly in `<chart>`, before the

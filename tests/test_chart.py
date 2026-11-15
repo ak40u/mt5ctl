@@ -165,6 +165,8 @@ def test_invalid_timeframe_combination_reads_as_none() -> None:
         ("H1", (1, 1)),
         ("h4", (1, 4)),
         ("D1", (1, 24)),
+        ("W1", (2, 1)),
+        ("mn1", (3, 1)),
     ],
 )
 def test_timeframe_codes(name: str, codes: tuple[int, int]) -> None:
@@ -175,16 +177,21 @@ def test_timeframe_codes(name: str, codes: tuple[int, int]) -> None:
 
 
 def test_timeframes_of_real_terminal_charts() -> None:
-    assert str(ChartFile.read(CHARTS / "terminal-h1.chr").timeframe) == "H1"
-    assert str(ChartFile.read(CHARTS / "terminal-d1.chr").timeframe) == "D1"
+    for name, tf in (
+        ("terminal-h1.chr", "H1"),
+        ("terminal-d1.chr", "D1"),
+        ("terminal-w1.chr", "W1"),
+        ("terminal-mn1.chr", "MN1"),
+    ):
+        assert str(ChartFile.read(CHARTS / name).timeframe) == tf
 
 
-@pytest.mark.parametrize("codes", [(2, 1), (3, 1), (4, 1), (1, 5), (0, 7)])
+@pytest.mark.parametrize("codes", [(2, 2), (3, 6), (4, 1), (1, 5), (0, 7)])
 def test_unobserved_codes_read_as_none(codes: tuple[int, int]) -> None:
     assert Timeframe.from_codes(*codes) is None
 
 
-@pytest.mark.parametrize("name", ["H5", "M7", "D2", "W1", "MN1", "X1", "", "4H"])
+@pytest.mark.parametrize("name", ["H5", "M7", "D2", "W2", "MN3", "X1", "", "4H"])
 def test_timeframe_rejects_unknown(name: str) -> None:
     with pytest.raises(ValueError):
         Timeframe.parse(name)

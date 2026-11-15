@@ -116,7 +116,16 @@ def compute_plan(bundle: Bundle, state: TerminalState) -> DeployPlan:
                 unchanged.append(path)
             else:
                 update.append(path)
-                if actual != managed[path]:
+                if (
+                    path in bundle.chart_experts
+                    and path in state.charts
+                    and (state.charts[path] is None and path not in state.unresolved_charts)
+                ):
+                    notes.append(
+                        f"{path}: the terminal saved this chart without its expert, which "
+                        "usually means the expert failed to load; see verify for the reason"
+                    )
+                elif actual != managed[path]:
                     notes.append(f"{path}: changed on the terminal since the last deploy")
         elif present:
             conflicts.append(path)

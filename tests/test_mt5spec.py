@@ -170,3 +170,15 @@ def test_investor_mode_means_trading_disabled() -> None:
 def test_level_column() -> None:
     lost = next(ln for ln in RECONNECT.splitlines() if "lost" in ln)
     assert lost.split("\t")[1] == "1"  # warning
+
+
+def test_failed_expert_lines() -> None:
+    """Real lines: a damaged .ex5 and an expert whose OnInit returned INIT_FAILED."""
+    failed = {m["name"] for m in mt5spec.LOG_EXPERT_FAILED_RE.finditer(JOURNAL)}
+    assert failed == {"ProbeTruncated", "ProbeInitFailed"}
+    st = TerminalStatus("t", "h", Env.DEMO, "active", connected=True)
+    expected = {"ProbeOpenCharts", "ProbeInitFailed", "ProbeTruncated", "ProbeCorrupt"}
+    report = operations.evaluate_verify(st, JOURNAL, expected)
+    assert report.loaded == ("ProbeOpenCharts",)
+    assert report.failed == ("ProbeInitFailed", "ProbeTruncated")
+    assert report.pending == ("ProbeCorrupt",)  # random bytes: nothing is logged
