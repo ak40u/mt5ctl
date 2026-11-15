@@ -85,7 +85,8 @@ TERMINAL_EXECUTABLES = ("terminal64.exe",)
 
 # Exit codes are not documented. Observed (build 6320, Wine 11): `taskkill
 # /IM terminal64.exe` without /F makes the terminal close itself and save its
-# profile, journal line "exit with code 0".
+# profile, journal line "exit with code 0" -- provided taskkill runs with the
+# terminal's DISPLAY and XAUTHORITY, and no modal window is open.
 
 # TCP port broker trade servers listen on; an established connection to it from
 # the terminal process counts as "connected".

@@ -87,7 +87,8 @@ your charts into `chart02`, or give that slot a chart without an expert.
 
 ## systemd unit
 
-mt5ctl needs one unit per terminal. A minimal system unit for Wine under Xvfb:
+mt5ctl needs one unit per terminal. A system unit for Wine with its own virtual
+display, as run for the formats in `mt5spec.py`:
 
 ```ini
 [Unit]
@@ -96,11 +97,15 @@ After=network-online.target
 
 [Service]
 User=trader
-Environment=WINEPREFIX=/home/trader/.wine-demo1 DISPLAY=:91
+Environment=WINEPREFIX=/home/trader/mt5/demo1-prefix
+Environment=WINEDEBUG=-all
+Environment=DISPLAY=:91
+Environment=XAUTHORITY=/home/trader/mt5/demo1.Xauthority
 WorkingDirectory=/home/trader/mt5/demo1
-ExecStart=/usr/bin/wine terminal64.exe /portable
+ExecStart=/usr/bin/xvfb-run -n 91 -f /home/trader/mt5/demo1.Xauthority -s "-screen 0 1280x1024x24 -nolisten tcp" /usr/bin/wine terminal64.exe /portable /skipupdate /config:cfg\\login.ini
 ExecStop=/usr/bin/wine taskkill /IM terminal64.exe
 TimeoutStopSec=60
+KillMode=control-group
 Restart=on-failure
 
 [Install]
@@ -124,7 +129,17 @@ ExecStop=/usr/bin/wine taskkill /IM terminal64.exe
 ```
 
 `taskkill /IM` addresses every `terminal64.exe` in the Wine prefix, so give each
-terminal its own `WINEPREFIX`. mt5ctl calls `systemctl stop` and then waits for
+terminal its own `WINEPREFIX`. `ExecStop` must also see the terminal's
+`DISPLAY` and `XAUTHORITY`: without them `taskkill` reports that it sent the
+close request, but the terminal does not close, and systemd ends it after
+`TimeoutStopSec` without the profile being saved (observed). That is why the unit
+gives `xvfb-run` a fixed authority file (`-f`) instead of its default temporary one.
+
+Two more things keep the close from working: a modal window, such as the
+"Select a company to open an account with" dialog of a terminal that has no
+account to log in to, and a `/config:` file the terminal cannot read (it logs
+`cannot load config ... at start` and starts without logging in). `mt5ctl stop`
+and `deploy` report a stop that systemd had to force. mt5ctl calls `systemctl stop` and then waits for
 the process to be gone, so it benefits from such a unit without any
 configuration.
 
