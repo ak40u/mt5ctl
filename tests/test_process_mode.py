@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from pathlib import Path
 
 import pytest
@@ -14,7 +15,9 @@ from mt5ctl.models import Host, Registry, Terminal
 
 
 @pytest.fixture
-def registry(tmp_path: Path) -> Registry:
+def registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Registry:
+    # The fakes (ss among them) first, so results do not depend on the machine.
+    monkeypatch.setenv("PATH", f"{FAKES}{os.pathsep}{os.environ['PATH']}")
     data = tmp_path / "terminal"
     data.mkdir()
     return Registry(

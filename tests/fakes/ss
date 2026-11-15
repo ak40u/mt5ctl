@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# ss stand-in: one established connection to a broker port (:443) for every
+# process whose argv[0] is terminal64.exe, so that the socket check finds the
+# fake terminal "connected" whether or not the machine has the real ss.
+for d in /proc/[0-9]*; do
+  a0=$(tr '\000' '\n' < "$d/cmdline" 2>/dev/null | head -1)
+  case "$a0" in
+    *terminal64.exe)
+      printf '0 0 10.0.0.2:40000 203.0.113.7:443 users:(("terminal64.exe",pid=%s,fd=3))\n' "${d#/proc/}" ;;
+  esac
+done
