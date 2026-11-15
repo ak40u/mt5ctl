@@ -27,7 +27,9 @@ lock ─ plan ─┬─ nothing to change ─ verify (no restart) ─ unlock
    `mv`, which is atomic only within one filesystem).
 4. **Stop and drain.** `systemctl stop`, then wait until the unit is inactive and
    no `terminal64.exe` is left in its cgroup. The terminal writes chart files
-   while it shuts down; nothing is written before it is gone.
+   while it shuts down; nothing is written before it is gone. A terminal that
+   was already stopped is not touched: the files are written, and it stays
+   stopped (steps 4 and 9 are skipped; `deploy` says so).
 5. **Plan again**, on the files as the terminal left them. If it saved a managed
    chart differently while stopping (for example without its expert), that chart
    is now an update and is put back.

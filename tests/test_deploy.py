@@ -794,7 +794,17 @@ def test_stopping_a_stopped_terminal_is_clean(farm: Farm, tmp_path: Path) -> Non
     farm.set_state("inactive")
     farm.journal_on_start("Trend")
     deployed = deploy(farm, bundle_v1(tmp_path / "v1"))
-    assert deployed.stopped_cleanly is True
+    assert deployed.left_stopped and deployed.stopped_cleanly is None
+
+
+def test_deploy_leaves_a_stopped_terminal_stopped(farm: Farm, tmp_path: Path) -> None:
+    """Someone stopped the terminal (news, a problem): a deploy must not start it."""
+    farm.set_state("inactive")
+    result = deploy(farm, bundle_v1(tmp_path / "v1"))
+    assert result.left_stopped and not result.restarted and result.verify is None
+    assert (farm.data / EXPERT).read_bytes() == b"trend v1"
+    assert farm.calls == []
+    assert (farm.systemd / "mt5-demo1.service.state").read_text().strip() == "inactive"
 
 
 def test_verify_stops_waiting_when_the_outcome_is_settled(farm: Farm, tmp_path: Path) -> None:

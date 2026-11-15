@@ -66,7 +66,10 @@ stopped):
 | `.mt5ctl/` | mt5ctl's own state: the manifest of what it placed, the five newest backups, upload staging, the lock |
 
 On the host, it runs `systemctl stop` and `systemctl start` for the terminal's
-unit — only when something actually changes.
+unit — only when something actually changes, and only if the terminal was
+running: a terminal someone stopped is deployed to and left stopped. A restart
+stops every expert on the terminal, foreign ones included, for the seconds it
+takes; they start again with `OnInit`.
 
 It never touches other profiles, templates, presets, indicators or libraries,
 `config/` (accounts, passwords, servers), Market Watch, history, the journal, or

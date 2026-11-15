@@ -1066,6 +1066,7 @@ async def deploy(
         outcome: _ApplyOutcome | None = None
         reader: Callable[[], Awaitable[str]] = _since_latest_start(host, term)
         note: str | None = None
+        left_stopped = False
         before = await collect_state(registry, term, bundle.files)
         current = compute_plan(bundle, before)
         if current.blocked:
@@ -1092,11 +1093,21 @@ async def deploy(
                     order_relpath(bundle.profile),
                 ],
             )
-            # Counted as stopped before asking: a stop that reports an error (a
-            # dropped connection, a slow ExecStop) may still complete on the host,
-            # and starting a unit that is already running does nothing.
-            stop_requested = True
-            stop_result = await _stop_and_drain(host, term)
+            (now,) = await status(registry, [term.id])
+            if now.service_state in ("inactive", "failed"):
+                # Stopped by someone (on news, for a fix): deploy, but leave it so.
+                if now.terminal_running:
+                    raise DeployError(
+                        f"{term.id}'s unit is {now.service_state}, yet a terminal process "
+                        "runs on its data folder; stop it before deploying"
+                    )
+                left_stopped = True
+            else:
+                # Counted as stopped before asking: a stop that reports an error (a
+                # dropped connection, a slow ExecStop) may still complete on the
+                # host, and starting a unit that is already running does nothing.
+                stop_requested = True
+                stop_result = await _stop_and_drain(host, term)
             state = await collect_state(registry, term, bundle.files)
             moved = chart_moves(before.chart_digests, state.chart_digests)
             if moved:
@@ -1129,6 +1140,14 @@ async def deploy(
 
         if outcome is not None and outcome.error is not None and outcome.restore != "applied":
             raise DeployError(_apply_failure(term, outcome))
+        if left_stopped:
+            return DeployResult(
+                terminal=term.id,
+                plan=current,
+                restarted=False,
+                backup=outcome.backup if outcome else None,
+                left_stopped=True,
+            )
         report = await _verify(
             registry,
             term,

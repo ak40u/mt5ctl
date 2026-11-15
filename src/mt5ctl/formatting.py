@@ -91,7 +91,13 @@ def deploy_lines(result: DeployResult) -> list[str]:
         lines.append(f"backup: {result.backup}")
     if result.stop is not None and not result.stop.clean:
         lines.append(f"warning: {UNCLEAN_STOP}")
-    lines.append("restarted" if result.restarted else "not restarted (nothing changed)")
+    if result.left_stopped:
+        lines.append(
+            "the terminal was stopped before the deploy and is left stopped; "
+            f"start it with: mt5ctl start {result.terminal}"
+        )
+    else:
+        lines.append("restarted" if result.restarted else "not restarted (nothing changed)")
     if result.verify is not None:
         state = "healthy" if result.verify.healthy else "NOT healthy"
         lines.append(f"verify: {state} — {result.verify.detail}")
@@ -106,6 +112,7 @@ def deploy_payload(result: DeployResult) -> dict[str, Any]:
         "terminal": result.terminal,
         "plan": plan_payload(result.plan),
         "restarted": result.restarted,
+        "left_stopped": result.left_stopped,
         "backup": result.backup,
         "verify": verify_payload(result.verify),
     }

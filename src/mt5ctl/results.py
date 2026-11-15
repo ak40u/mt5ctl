@@ -110,6 +110,8 @@ class DeployResult:
     verify: VerifyReport | None = None
     stop: StopResult | None = None
     """How the terminal stopped; ``None`` when the deploy did not stop it."""
+    left_stopped: bool = False
+    """The terminal was stopped before the deploy, and it was left stopped."""
 
     @property
     def stopped_cleanly(self) -> bool | None:
