@@ -5,6 +5,7 @@
 #   <unit>.on-start  executable run when the unit starts (terminal writing its journal)
 #   <unit>.fail-<action>         makes that action fail without doing it
 #   <unit>.fail-after-<action>   does the action, then reports failure (a dropped link)
+#   <unit>.drop-<action>         fails once with exit 255 without doing it (no link)
 #   <unit>.result    the Result systemd reports for the last stop (default success)
 #   <unit>.killed    the terminal does not close itself: no exit line on stop
 #   <unit>.env       the unit's Environment (show -p Environment)
@@ -21,6 +22,9 @@ case "$cmd" in
   start|stop|restart)
     u="$1"; echo "$cmd $u" >> "$D/calls"
     [ -f "$D/$u.fail-$cmd" ] && { echo "fake: $cmd failed" >&2; exit 1; }
+    if [ -f "$D/$u.drop-$cmd" ]; then  # the connection drops once: ssh's exit 255
+      rm -f "$D/$u.drop-$cmd"; echo "fake: connection closed" >&2; exit 255
+    fi
     if [ "$cmd" != start ]; then
       [ -x "$D/$u.on-stop" ] && "$D/$u.on-stop"
       # A terminal that closes itself writes its exit line to the journal.

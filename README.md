@@ -336,7 +336,10 @@ needs no sudo.
   more is removed, the error says so and names the backup, and running the
   deploy again completes it.
 - **Always started again.** Once asked to stop, the terminal is started again
-  after an error, a dropped connection, Ctrl-C or a cancelled MCP call.
+  after an error, a dropped connection (retried for about two minutes), Ctrl-C,
+  SIGTERM, SIGHUP or a cancelled MCP call, and an apply that has begun finishes
+  first. Not covered: mt5ctl itself killed outright, or a connection down for
+  longer than that.
 - **Refuses rather than guesses.** A bundle file landing on a file mt5ctl does not
   manage is a conflict and the deploy refuses. A corrupt manifest, or one listing
   a path outside the managed folders, stops everything. If any foreign chart's

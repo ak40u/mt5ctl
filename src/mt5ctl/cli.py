@@ -11,12 +11,15 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import signal
 import sys
 import time
-from collections.abc import Sequence
+from collections.abc import Coroutine, Sequence
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar, cast
+
+import anyio
 
 from . import __version__, operations
 from . import formatting as fmt
@@ -24,6 +27,8 @@ from .bundle import Bundle, read_bundle
 from .chart import ChartFile
 from .config import load_registry, write_starter
 from .errors import Mt5ctlError
+
+T = TypeVar("T")
 
 EXIT_OK = 0
 EXIT_ERROR = 1
@@ -121,7 +126,7 @@ def _cmd_bundle_check(args: argparse.Namespace) -> int:
 
 def _cmd_plan(args: argparse.Namespace) -> int:
     registry = load_registry(args.config)
-    report = asyncio.run(operations.plan(registry, args.terminal, args.bundle))
+    report = _run(operations.plan(registry, args.terminal, args.bundle))
     if args.json:
         _emit_json(
             {
@@ -148,7 +153,7 @@ def _output(args: argparse.Namespace, payload: Any, lines: list[str]) -> None:
 
 def _cmd_deploy(args: argparse.Namespace) -> int:
     registry = load_registry(args.config)
-    result = asyncio.run(
+    result = _run(
         operations.deploy(
             registry,
             args.terminal,
@@ -165,7 +170,7 @@ def _cmd_deploy(args: argparse.Namespace) -> int:
 
 def _cmd_adopt(args: argparse.Namespace) -> int:
     registry = load_registry(args.config)
-    result = asyncio.run(
+    result = _run(
         operations.adopt(registry, args.terminal, args.bundle, confirm=args.confirm_live)
     )
     _output(args, asdict(result), fmt.adopt_lines(result))
@@ -174,14 +179,14 @@ def _cmd_adopt(args: argparse.Namespace) -> int:
 
 def _cmd_status(args: argparse.Namespace) -> int:
     registry = load_registry(args.config)
-    rows = asyncio.run(operations.status(registry, args.terminals or None))
+    rows = _run(operations.status(registry, args.terminals or None))
     _output(args, fmt.status_payload(rows), fmt.status_lines(rows))
     return EXIT_OK if all(r.healthy for r in rows) else EXIT_UNHEALTHY
 
 
 def _cmd_restart(args: argparse.Namespace) -> int:
     registry = load_registry(args.config)
-    result = asyncio.run(
+    result = _run(
         operations.restart(
             registry,
             args.terminal,
@@ -199,7 +204,7 @@ def _cmd_restart(args: argparse.Namespace) -> int:
 
 def _cmd_start(args: argparse.Namespace) -> int:
     registry = load_registry(args.config)
-    result = asyncio.run(
+    result = _run(
         operations.start(
             registry,
             args.terminal,
@@ -217,7 +222,7 @@ def _cmd_start(args: argparse.Namespace) -> int:
 
 def _cmd_stop(args: argparse.Namespace) -> int:
     registry = load_registry(args.config)
-    result = asyncio.run(operations.stop(registry, args.terminal, confirm=args.confirm_live))
+    result = _run(operations.stop(registry, args.terminal, confirm=args.confirm_live))
     _output(
         args,
         {
@@ -233,7 +238,7 @@ def _cmd_stop(args: argparse.Namespace) -> int:
 
 def _cmd_verify(args: argparse.Namespace) -> int:
     registry = load_registry(args.config)
-    report = asyncio.run(operations.verify(registry, args.terminal, timeout=args.timeout))
+    report = _run(operations.verify(registry, args.terminal, timeout=args.timeout))
     state = "healthy" if report.healthy else "NOT healthy"
     _output(args, fmt.verify_payload(report), [f"{args.terminal}: {state} — {report.detail}"])
     return EXIT_OK if report.healthy else EXIT_UNHEALTHY
@@ -241,7 +246,7 @@ def _cmd_verify(args: argparse.Namespace) -> int:
 
 def _cmd_compile(args: argparse.Namespace) -> int:
     registry = load_registry(args.config)
-    result = asyncio.run(
+    result = _run(
         operations.compile_sources(
             registry, args.terminal, args.sources, args.out, confirm=args.confirm_live
         )
@@ -252,7 +257,7 @@ def _cmd_compile(args: argparse.Namespace) -> int:
 
 def _cmd_experts(args: argparse.Namespace) -> int:
     registry = load_registry(args.config)
-    reports = asyncio.run(operations.experts(registry, args.terminals or None))
+    reports = _run(operations.experts(registry, args.terminals or None))
     lines = (fmt.autotrading_lines if args.command == "autotrading" else fmt.ea_list_lines)(
         reports
     )
@@ -262,7 +267,7 @@ def _cmd_experts(args: argparse.Namespace) -> int:
 
 def _cmd_screenshot(args: argparse.Namespace) -> int:
     registry = load_registry(args.config)
-    shot = asyncio.run(operations.screenshot(registry, args.terminal))
+    shot = _run(operations.screenshot(registry, args.terminal))
     target = (
         Path(args.output)
         if args.output
@@ -287,14 +292,14 @@ def _cmd_init(args: argparse.Namespace) -> int:
 
 def _cmd_doctor(args: argparse.Namespace) -> int:
     registry = load_registry(args.config)
-    checks = asyncio.run(operations.doctor(registry))
+    checks = _run(operations.doctor(registry))
     _output(args, [asdict(c) for c in checks], fmt.doctor_lines(checks))
     return EXIT_ERROR if any(c.status == "fail" for c in checks) else EXIT_OK
 
 
 def _cmd_logs(args: argparse.Namespace) -> int:
     registry = load_registry(args.config)
-    result = asyncio.run(
+    result = _run(
         operations.logs(
             registry,
             args.terminal,
@@ -309,7 +314,7 @@ def _cmd_logs(args: argparse.Namespace) -> int:
 
 def _cmd_info(args: argparse.Namespace) -> int:
     registry = load_registry(args.config)
-    rows = asyncio.run(operations.info(registry, args.terminals or None))
+    rows = _run(operations.info(registry, args.terminals or None))
     _output(args, [asdict(r) for r in rows], fmt.info_lines(rows))
     return EXIT_ERROR if any(r.error for r in rows) else EXIT_OK
 
@@ -319,7 +324,7 @@ def _cmd_login(args: argparse.Namespace) -> int:
     if args.password_stdin:
         password = sys.stdin.readline().rstrip("\r\n")
     registry = load_registry(args.config)
-    result = asyncio.run(
+    result = _run(
         operations.login(
             registry,
             args.terminal,
@@ -538,6 +543,65 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+EXIT_INTERRUPTED = 130
+_SIGNALS = tuple(
+    getattr(signal, name) for name in ("SIGINT", "SIGTERM", "SIGHUP") if hasattr(signal, name)
+)
+
+
+def _run(coro: Coroutine[Any, Any, T]) -> T:
+    """Run one operation, turning Ctrl-C, SIGTERM and SIGHUP into a cancellation.
+
+    Under a plain ``asyncio.run`` a signal cancels the task outright, and a
+    second Ctrl-C kills the process in the middle of whatever it does. Here a
+    signal cancels the operation the way an MCP client does: the steps that
+    must not be cut short (an apply, starting the terminal again, releasing
+    the lock) finish first. Further signals only say so.
+    """
+    if not _SIGNALS or sys.platform == "win32":
+        return asyncio.run(coro)
+    state: dict[str, Any] = {}
+
+    async def guarded() -> None:
+        async with anyio.create_task_group() as tg:
+
+            async def work() -> None:
+                try:
+                    with anyio.CancelScope() as scope:
+                        state["scope"] = scope
+                        state["result"] = await coro
+                except Exception as exc:  # re-raised below, outside the task group
+                    state["error"] = exc
+                finally:
+                    tg.cancel_scope.cancel()
+
+            async def watch() -> None:
+                with anyio.open_signal_receiver(*_SIGNALS) as signals:
+                    async for signum in signals:
+                        first = "signal" not in state
+                        state["signal"] = signum
+                        if first:
+                            print(
+                                "mt5ctl: interrupted; finishing the steps that must not be "
+                                "cut short (starting the terminal again, releasing the lock)",
+                                file=sys.stderr,
+                            )
+                            if "scope" in state:
+                                state["scope"].cancel()
+                        else:
+                            print("mt5ctl: still finishing, please wait", file=sys.stderr)
+
+            tg.start_soon(work)
+            tg.start_soon(watch)
+
+    anyio.run(guarded)
+    if "error" in state:
+        raise state["error"]
+    if "result" not in state:
+        raise KeyboardInterrupt
+    return cast(T, state["result"])
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
@@ -545,6 +609,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     except Mt5ctlError as exc:
         print(f"mt5ctl: error: {exc}", file=sys.stderr)
         return EXIT_ERROR
+    except KeyboardInterrupt:
+        print("mt5ctl: interrupted", file=sys.stderr)
+        return EXIT_INTERRUPTED
 
 
 def entrypoint() -> None:

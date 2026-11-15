@@ -22,6 +22,7 @@ import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
+from typing import TypeVar
 
 import anyio
 
@@ -75,6 +76,7 @@ from .state import (
 from .text import decode_lenient
 
 SEP = scripts.SEP
+T = TypeVar("T")
 
 # Drain must outlast the unit's own stop timeout plus a slow Wine teardown.
 DRAIN_TIMEOUT_S = 90
@@ -553,6 +555,54 @@ def _timestamp() -> str:
     return time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:6]
 
 
+async def _uncancellable(aw: Awaitable[T]) -> T:
+    """Await *aw* to its end, whatever cancels the caller meanwhile.
+
+    Two kinds of cancellation reach a run: an anyio scope (an MCP client giving
+    up) and asyncio's own ``Task.cancel()`` (``asyncio.run`` on Ctrl-C, or a
+    library caller). An anyio shield stops only the first. Here *aw* runs as
+    its own task that neither can interrupt; the caller is still cancelled
+    afterwards, once *aw* is done.
+    """
+    task = asyncio.ensure_future(aw)
+    interrupted = False
+    with anyio.CancelScope(shield=True):
+        while True:
+            try:
+                result = await asyncio.shield(task)
+                break
+            except asyncio.CancelledError:
+                if task.cancelled():
+                    raise
+                interrupted = True
+    if interrupted:
+        raise asyncio.CancelledError
+    return result
+
+
+START_RETRY_DELAYS_S = (5.0, 15.0, 30.0, 60.0)
+
+
+async def _start_again(host: Host, term: Terminal) -> None:
+    """Start a terminal mt5ctl stopped, retrying while the host cannot be reached.
+
+    A dropped connection right after the stop must not leave the terminal down
+    for want of one attempt; an answer from the host (the unit failed) is final.
+    """
+    for delay in (*START_RETRY_DELAYS_S, None):
+        try:
+            await _control(host, term, "start")
+            return
+        except RemoteCommandError:
+            if delay is None:
+                raise
+            await asyncio.sleep(delay)
+        except DeployError as exc:
+            if delay is None or "exit 255" not in str(exc):
+                raise
+            await asyncio.sleep(delay)
+
+
 async def _release(host: Host, term: Terminal, holder: str) -> None:
     await transport.run(host, scripts.build_lock_release_script(term.data_dir, holder))
 
@@ -569,15 +619,16 @@ async def _locked(host: Host, term: Terminal) -> AsyncIterator[str]:
     """
     holder = _holder()
     try:
-        with anyio.CancelScope(shield=True):
-            result = await transport.run(
+        result = await _uncancellable(
+            transport.run(
                 host,
                 scripts.build_lock_acquire_script(term.data_dir, holder, LOCK_STALE_S),
                 check=False,
             )
+        )
     except BaseException:
-        with anyio.CancelScope(shield=True), contextlib.suppress(Exception):
-            await _release(host, term, holder)
+        with contextlib.suppress(Exception):
+            await _uncancellable(_release(host, term, holder))
         raise
     for fields in _lines(result.stdout, "LOCK"):
         if fields and fields[0] == "held":
@@ -596,17 +647,16 @@ async def _locked(host: Host, term: Terminal) -> AsyncIterator[str]:
         yield holder
         body_ok = True
     finally:
-        with anyio.CancelScope(shield=True):
-            try:
-                await _release(host, term, holder)
-            except RemoteCommandError as exc:
-                # Never mask the body's own error; otherwise say what is left behind.
-                if body_ok:
-                    raise DeployError(
-                        f"the operation on {term.id} completed, but its lock could not be "
-                        f"released ({exc}); it expires after {LOCK_STALE_S // 60} minutes, "
-                        f"or remove {term.data_dir}/{scripts.LOCK_PATH}"
-                    ) from None
+        try:
+            await _uncancellable(_release(host, term, holder))
+        except RemoteCommandError as exc:
+            # Never mask the body's own error; otherwise say what is left behind.
+            if body_ok:
+                raise DeployError(
+                    f"the operation on {term.id} completed, but its lock could not be "
+                    f"released ({exc}); it expires after {LOCK_STALE_S // 60} minutes, "
+                    f"or remove {term.data_dir}/{scripts.LOCK_PATH}"
+                ) from None
 
 
 async def restart(
@@ -629,8 +679,7 @@ async def restart(
     async with _locked(host, term):
         expected = await _live_experts(registry, term)
         cursor = await _journal_cursor(host, term)
-        with anyio.CancelScope(shield=True):
-            await _control(host, term, "restart")
+        await _uncancellable(_control(host, term, "restart"))
         report = await _verify(
             registry,
             term,
@@ -689,8 +738,7 @@ async def stop(registry: Registry, terminal_id: str, *, confirm: bool = False) -
     _require_live_confirmation(term, "stop", confirm)
     _require_supervisor(term, "stop")
     async with _locked(host, term):
-        with anyio.CancelScope(shield=True):
-            result = await _stop_and_drain(host, term)
+        result = await _uncancellable(_stop_and_drain(host, term))
     return result
 
 
@@ -710,8 +758,7 @@ async def start(
     async with _locked(host, term):
         expected = await _live_experts(registry, term)
         cursor = await _journal_cursor(host, term)
-        with anyio.CancelScope(shield=True):
-            await _control(host, term, "start")
+        await _uncancellable(_control(host, term, "start"))
         report = await _verify(
             registry,
             term,
@@ -875,15 +922,18 @@ async def deploy(
             if current.blocked:
                 raise DeployError(_conflict_message(current))
             if current.has_changes:
-                with anyio.CancelScope(shield=True):
-                    outcome = await _apply(
-                        host, term, bundle, current, state, unit_user, holder
-                    )
+                outcome = await _uncancellable(
+                    _apply(host, term, bundle, current, state, unit_user, holder)
+                )
         finally:
             if stop_requested:
-                with anyio.CancelScope(shield=True):
-                    cursor = await _journal_cursor(host, term)
-                    await _control(host, term, "start")
+
+                async def start_again() -> JournalCursor:
+                    mark = await _journal_cursor(host, term)
+                    await _start_again(host, term)
+                    return mark
+
+                cursor = await _uncancellable(start_again())
 
         if outcome is not None and outcome.error is not None and outcome.restore != "applied":
             raise DeployError(_apply_failure(term, outcome))
@@ -1627,10 +1677,13 @@ async def login(
     timeout = _verify_window(verify_timeout, VERIFY_TIMEOUT_S)
     async with _locked(host, term):
         expected = await _live_experts(registry, term)
-        with anyio.CancelScope(shield=True):
-            await _stop_and_drain(host, term)
+        await _uncancellable(_stop_and_drain(host, term))
         try:
-            result = await transport.run(host, script, check=False, timeout=wait_s + 120)
+            # Not cut short either: ended by a signal, the script could not shred
+            # the file that holds the password.
+            result = await _uncancellable(
+                transport.run(host, script, check=False, timeout=wait_s + 120)
+            )
             for fields in _lines(result.stdout, "LOGIN"):
                 outcome = fields[0] if fields else "error"
                 detail = (
@@ -1640,9 +1693,8 @@ async def login(
             # Never echo the script: it holds the password. stderr does not.
             outcome, detail = "error", str(exc)
         finally:
-            with anyio.CancelScope(shield=True):
-                await _control(host, term, "start")
-                restarted = True
+            await _uncancellable(_start_again(host, term))
+            restarted = True
         if outcome == "ok":
             report = await _verify(
                 registry,

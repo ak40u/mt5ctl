@@ -65,9 +65,14 @@ Then the terminal starts again. A failed verify does not roll back; it exits
 with code 3 and says what is missing.
 
 Once the terminal has been asked to stop, it is started again whatever happens
-next: an error, a dropped connection while stopping, or the caller giving up
-(an MCP client cancelling the tool call, Ctrl-C). The apply and the start run
-shielded from cancellation, and the lock is always released.
+next: an error, a dropped connection, or the caller giving up (an MCP client
+cancelling the tool call; Ctrl-C, SIGTERM or SIGHUP to the CLI). An apply that
+has begun finishes before the terminal starts; taking and releasing the lock
+and the start itself are not cut short either, and a second Ctrl-C does not
+skip them. If the host cannot be reached for the start, it is retried for about
+two minutes. What no program can cover: the machine running mt5ctl losing power
+or the process being killed outright (SIGKILL), and a connection that stays
+down longer than the retries; the error then says the terminal is stopped.
 
 A deploy with nothing to change does not restart the terminal; its verify reads
 the journal since the terminal's latest start (today's and yesterday's files).

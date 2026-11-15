@@ -18,7 +18,10 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
+import os
 import shlex
+import signal
 from dataclasses import dataclass
 
 from .errors import RemoteCommandError
@@ -87,6 +90,21 @@ def build_put_argv(host: Host, dest_dir: str) -> list[str]:
     return _argv(host, f"bash <(echo {payload} | base64 -d)")
 
 
+def _end_group(proc: asyncio.subprocess.Process) -> None:
+    """End the command and everything it started (its own process group).
+
+    Killing only the top process would leave a running script behind, still
+    writing after the caller gave up on it.
+    """
+    if proc.returncode is not None:
+        return
+    if hasattr(os, "killpg"):
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(proc.pid, signal.SIGKILL)
+    with contextlib.suppress(ProcessLookupError):
+        proc.kill()
+
+
 async def _exec(host: Host, argv: list[str], stdin: bytes, timeout: float) -> CommandResult:
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -94,15 +112,22 @@ async def _exec(host: Host, argv: list[str], stdin: bytes, timeout: float) -> Co
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            # Its own process group: a Ctrl-C at the terminal reaches mt5ctl only
+            # (which decides what may be cut short), and a timeout can end it all.
+            start_new_session=True,
         )
     except OSError as exc:
         raise RemoteCommandError(host.id, 127, f"cannot start {argv[0]}: {exc}") from None
     try:
         out, err = await asyncio.wait_for(proc.communicate(stdin), timeout=timeout)
     except TimeoutError:
-        proc.kill()
+        _end_group(proc)
         await proc.wait()
-        raise RemoteCommandError(host.id, 124, f"timed out after {timeout:.0f}s") from None
+        raise RemoteCommandError(host.id, 124, f"timed out after {timeout:g}s") from None
+    except BaseException:
+        # Cancelled: the caller no longer waits for this command, so end it.
+        _end_group(proc)
+        raise
     return CommandResult(
         returncode=proc.returncode or 0,
         stdout=out.decode("utf-8", "replace"),
