@@ -33,5 +33,7 @@ All notable changes to this project are documented here. The format follows
   renumbers charts to close gaps when it saves the profile.
 - `Expert.algo_trading`; `bundle check` warns about experts that would load
   without trading.
+- `status` and `verify` report an account whose trading is disabled (investor
+  password) as not healthy.
 - CLI: `chart show`, `bundle check`, `plan`, `list`, `deploy`, `adopt`, `status`,
   `restart`, `verify`, `compile`, `serve`, all with `--json`.

@@ -37,7 +37,8 @@ lock ─ plan ─┬─ nothing to change ─ verify (no restart) ─ unlock
    and the manifest is written last.
 9. **Start and verify.** `systemctl start`, then poll until the service is
    active, the journal shows the broker authorization and every expert of the
-   bundle logged `loaded successfully` — or until `--verify-timeout`
+   bundle logged `loaded successfully`, with no "trading has been disabled"
+   (investor password) after the login — or until `--verify-timeout`
    (default 180 s). Verify reads only journal lines written after the start; the
    lines it looks for are defined in [`mt5spec.py`](../src/mt5ctl/mt5spec.py).
 
@@ -126,6 +127,16 @@ ExecStop=/usr/bin/wine taskkill /IM terminal64.exe
 terminal its own `WINEPREFIX`. mt5ctl calls `systemctl stop` and then waits for
 the process to be gone, so it benefits from such a unit without any
 configuration.
+
+## Keeping the terminal build fixed
+
+The formats mt5ctl relies on are checked against one terminal build (see
+[`mt5spec.py`](../src/mt5ctl/mt5spec.py)). A terminal updates itself through
+LiveUpdate when MetaQuotes releases a build. Observed under Wine (build 6320):
+starting it with `/skipupdate` and making `terminal64.exe`, `metatester64.exe`
+and `MetaEditor64.exe` read-only keeps the build, and the terminal and tester
+keep working. Update deliberately, and check `mt5ctl plan` and `verify` on a
+demo terminal after each update.
 
 ## Compiling
 

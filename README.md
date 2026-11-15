@@ -19,10 +19,10 @@ over MCP.
 ---
 
 > **Pre-release.** Every command works end to end in the test suite, which runs
-> the real shell scripts against a simulated terminal, and the file formats,
-> expert block included, are checked against files saved by MetaTrader 5 build
-> 6320. A few journal lines are still assumptions; see [Limitations](#limitations).
-> Try it on a demo terminal first.
+> the real shell scripts against a simulated terminal, and the file formats and
+> journal lines are checked against files saved by MetaTrader 5 build 6320,
+> logged in to a broker. The few remaining assumptions are listed under
+> [Limitations](#limitations). Try it on a demo terminal first.
 
 ## Why
 
@@ -324,6 +324,9 @@ needs no sudo.
   a path outside the managed folders, stops everything. If any foreign chart's
   expert cannot be identified, no expert is removed.
 - **Live terminals need confirmation**: `--confirm-live`, or `confirm=true` over MCP.
+- **An account that cannot trade is not healthy.** Logged in with the investor
+  password, a terminal loads every expert but refuses every order; `status` and
+  `verify` report `TRADING DISABLED (investor mode)` and exit with code 3.
 - **Not rolled back on a slow start.** If verify fails after a deploy, the files
   are as intended; mt5ctl reports what has not loaded (exit code 3) instead of
   undoing a correct deploy because the broker reconnected slowly.
@@ -332,11 +335,11 @@ needs no sudo.
 
 ## Limitations
 
-- **Unconfirmed details.** The journal lines for broker authorization, lost
-  connections and failed expert loads follow MetaTrader 4 and have not yet been
-  seen from MetaTrader 5; for the connection, verify uses the terminal's sockets
-  where it can. Of `expertmode`, only the "Allow Algo Trading" bit is
-  known. Every assumption about undocumented behaviour is in one module,
+- **Unconfirmed details.** The journal line for an expert that fails to load
+  follows MetaTrader 4 and has not yet been seen from MetaTrader 5 (an expert
+  that never logs "loaded successfully" is still reported as not loaded). Of
+  `expertmode`, only the "Allow Algo Trading" bit is known. Every assumption
+  about undocumented behaviour is in one module,
   [`mt5spec.py`](src/mt5ctl/mt5spec.py), each with its source.
 - **Timeframes.** Minute and hour timeframes and D1 are supported; W1 and MN1 are
   not yet.
