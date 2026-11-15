@@ -220,8 +220,9 @@ def _cmd_stop(args: argparse.Namespace) -> int:
         args,
         {
             "terminal": result.terminal,
-            "unit_result": result.unit_result,
             "clean": result.clean,
+            "exit_code": result.exit_code,
+            "unit_result": result.unit_result,
         },
         fmt.stop_lines(result),
     )

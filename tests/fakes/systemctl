@@ -6,6 +6,8 @@
 #   <unit>.fail-<action>         makes that action fail without doing it
 #   <unit>.fail-after-<action>   does the action, then reports failure (a dropped link)
 #   <unit>.result    the Result systemd reports for the last stop (default success)
+#   <unit>.killed    the terminal does not close itself: no exit line on stop
+#   journal_dir      where the terminal's journal lives (for the exit line)
 #   calls            one line per state-changing call
 set -u
 D="${FAKE_SYSTEMD:?}"
@@ -20,6 +22,12 @@ case "$cmd" in
     [ -f "$D/$u.fail-$cmd" ] && { echo "fake: $cmd failed" >&2; exit 1; }
     if [ "$cmd" != start ]; then
       [ -x "$D/$u.on-stop" ] && "$D/$u.on-stop"
+      # A terminal that closes itself writes its exit line to the journal.
+      if [ -f "$D/journal_dir" ] && [ ! -f "$D/$u.killed" ]; then
+        jd=$(cat "$D/journal_dir"); mkdir -p "$jd"
+        printf 'GH\t0\t12:09:22.327\tTerminal\texit with code 0\r\n' \
+          | iconv -f UTF-8 -t UTF-16LE >> "$jd/20261115.log"
+      fi
       [ -f "$D/$u.stuck" ] && { echo deactivating > "$D/$u.state"; exit 0; }
       echo inactive > "$D/$u.state"
     fi

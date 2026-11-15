@@ -111,6 +111,12 @@ JOURNAL_GLOB = "*.log"
 # journal reaches the disk some seconds after the events (observed: about 13 s
 # after start), so a freshly started terminal may have no journal yet.
 # The failed-load line is MT4 heritage and has not been observed.
+# The terminal's own exit line: it closed itself (and saved its profile).
+# Observed (build 6320): "Terminal  exit with code 0", then "stopped with 0" and
+# "shutdown with 0". A terminal ended by a signal writes none of them. systemd's
+# Result for the unit is no guide: it reads "exit-code" even after a clean exit.
+LOG_TERMINAL_EXIT_RE = re.compile(r"exit with code (-?\d+)", re.IGNORECASE)
+
 JOURNAL_LEVEL_COLUMN = 1
 JOURNAL_LEVEL_ERROR = "2"
 LOG_TERMINAL_STARTED_RE = re.compile(r"MetaTrader 5 .*build \d+ started", re.IGNORECASE)

@@ -17,8 +17,9 @@ from .results import (
 )
 
 UNCLEAN_STOP = (
-    "the terminal did not close itself and systemd ended it, so it may not have saved "
-    "its profile; check for a dialog it was showing, or a too short TimeoutStopSec"
+    "the terminal wrote no exit line to its journal: systemd ended it, so it may not "
+    "have saved its profile. Check that ExecStop asks it to close and waits, on its "
+    "own DISPLAY, and that no dialog was open (see docs/deploy.md)"
 )
 
 
@@ -77,8 +78,8 @@ def deploy_lines(result: DeployResult) -> list[str]:
     lines = [f"deploy {result.terminal}:", *plan_lines(result.plan)]
     if result.backup:
         lines.append(f"backup: {result.backup}")
-    if result.stopped_cleanly is False:
-        lines.append(f"warning: {UNCLEAN_STOP} (Result={result.stop_result})")
+    if result.stop is not None and not result.stop.clean:
+        lines.append(f"warning: {UNCLEAN_STOP}")
     lines.append("restarted" if result.restarted else "not restarted (nothing changed)")
     if result.verify is not None:
         state = "healthy" if result.verify.healthy else "NOT healthy"
@@ -167,9 +168,12 @@ def restart_lines(result: RestartResult, verb: str = "restarted") -> list[str]:
 
 def stop_lines(result: StopResult) -> list[str]:
     if result.clean:
-        return [f"stopped {result.terminal}"]
+        return [
+            f"stopped {result.terminal} (the terminal exited with code {result.exit_code})"
+        ]
     return [
-        f"stopped {result.terminal}, but not cleanly (Result={result.unit_result})",
+        f"stopped {result.terminal}, but the terminal did not close itself "
+        f"(systemd Result={result.unit_result})",
         f"warning: {UNCLEAN_STOP}",
     ]
 

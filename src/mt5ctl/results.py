@@ -87,25 +87,27 @@ class DeployResult:
     """Backup of the managed files taken before the apply; ``None`` when nothing
     was replaced (first deploy, or no changes)."""
     verify: VerifyReport | None = None
-    stop_result: str | None = None
-    """systemd's ``Result`` for the stop: ``success`` when the terminal closed
-    itself; ``None`` when the deploy did not stop it."""
+    stop: StopResult | None = None
+    """How the terminal stopped; ``None`` when the deploy did not stop it."""
 
     @property
     def stopped_cleanly(self) -> bool | None:
-        return None if self.stop_result is None else self.stop_result == "success"
+        return None if self.stop is None else self.stop.clean
 
 
 @dataclass(frozen=True, slots=True)
 class StopResult:
     terminal: str
     unit_result: str
-    """systemd's ``Result``: ``success`` when the terminal closed itself;
-    ``timeout``, ``signal`` and the like when systemd had to end it."""
+    """systemd's ``Result`` for the unit, for information (see :attr:`clean`)."""
+    exit_code: int | None = None
+    """The code in the terminal's own "exit with code N" journal line; ``None``
+    when it wrote none, i.e. it did not close itself and systemd ended it."""
 
     @property
     def clean(self) -> bool:
-        return self.unit_result == "success"
+        """Whether the terminal closed itself, saving its profile on the way out."""
+        return self.exit_code is not None
 
 
 @dataclass(frozen=True, slots=True)

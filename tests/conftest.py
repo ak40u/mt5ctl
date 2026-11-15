@@ -86,4 +86,5 @@ def farm(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Farm:
     monkeypatch.setenv("PATH", f"{FAKES}{os.pathsep}{os.environ['PATH']}")
     farm = Farm(data=data, systemd=systemd, registry=make_registry(data))
     farm.set_state("active")
+    (systemd / "journal_dir").write_text(str(data / "logs"))
     return farm

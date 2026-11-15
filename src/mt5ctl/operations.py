@@ -532,6 +532,25 @@ async def restart(
     return RestartResult(terminal=term.id, verify=report)
 
 
+async def _stop_and_drain(host: Host, term: Terminal) -> StopResult:
+    """``systemctl stop``, wait for the process to be gone, tell how it went.
+
+    Whether the terminal closed itself is read from its own journal: the exit
+    line it writes on the way out (see :data:`mt5spec.LOG_TERMINAL_EXIT_RE`).
+    """
+    cursor = await _journal_cursor(host, term)
+    await _control(host, term, "stop")
+    unit_result = await _drain(host, term)
+    exit_code: int | None = None
+    try:
+        journal = await _journal_since(host, term, cursor)
+    except RemoteCommandError:
+        journal = ""
+    for match in mt5spec.LOG_TERMINAL_EXIT_RE.finditer(journal):
+        exit_code = int(match.group(1))
+    return StopResult(terminal=term.id, unit_result=unit_result, exit_code=exit_code)
+
+
 async def stop(registry: Registry, terminal_id: str, *, confirm: bool = False) -> StopResult:
     """Stop a terminal through systemd and wait until its process has exited."""
     term = registry.terminal(terminal_id)
@@ -540,9 +559,8 @@ async def stop(registry: Registry, terminal_id: str, *, confirm: bool = False) -
     _require_service(term, "stop")
     async with _locked(host, term):
         with anyio.CancelScope(shield=True):
-            await _control(host, term, "stop")
-            unit_result = await _drain(host, term)
-    return StopResult(terminal=term.id, unit_result=unit_result)
+            result = await _stop_and_drain(host, term)
+    return result
 
 
 async def start(
@@ -693,7 +711,7 @@ async def deploy(
 
     async with _locked(host, term):
         stop_requested = False
-        stop_result: str | None = None
+        stop_result: StopResult | None = None
         outcome: _ApplyOutcome | None = None
         cursor = JournalCursor("", 0)
         current = compute_plan(bundle, await collect_state(registry, term, bundle.files))
@@ -716,8 +734,7 @@ async def deploy(
             # dropped connection, a slow ExecStop) may still complete on the host,
             # and starting a unit that is already running does nothing.
             stop_requested = True
-            await _control(host, term, "stop")
-            stop_result = await _drain(host, term)
+            stop_result = await _stop_and_drain(host, term)
             state = await collect_state(registry, term, bundle.files)
             current = compute_plan(bundle, state)
             if current.blocked:
@@ -757,7 +774,7 @@ async def deploy(
         restarted=True,
         backup=outcome.backup if outcome else None,
         verify=report,
-        stop_result=stop_result,
+        stop=stop_result,
     )
 
 

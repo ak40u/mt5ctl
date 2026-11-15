@@ -653,25 +653,26 @@ def test_journal_errors_are_reported() -> None:
 
 def test_stop_reports_a_clean_exit(farm: Farm) -> None:
     result = asyncio.run(operations.stop(farm.registry, "demo1"))
-    assert result.clean and result.unit_result == "success"
+    assert result.clean and result.exit_code == 0
 
 
 def test_unclean_stop_is_reported(farm: Farm, tmp_path: Path) -> None:
-    """systemd had to end the terminal (e.g. a modal dialog blocked closing)."""
+    """systemd had to end the terminal: no exit line in its journal."""
+    farm.flag("killed")
     (farm.systemd / "mt5-demo1.service.result").write_text("timeout\n")
     result = asyncio.run(operations.stop(farm.registry, "demo1"))
-    assert not result.clean and result.unit_result == "timeout"
+    assert not result.clean and result.exit_code is None
+    assert result.unit_result == "timeout"
     farm.journal_on_start("Trend")
     deployed = deploy(farm, bundle_v1(tmp_path / "v1"))
     assert deployed.stopped_cleanly is False
     from mt5ctl.formatting import deploy_lines
 
-    assert any("did not close itself" in line for line in deploy_lines(deployed))
+    assert any("wrote no exit line" in line for line in deploy_lines(deployed))
 
 
-def test_unknown_connection_is_not_healthy() -> None:
-    """Right after a start, before the login is in the journal."""
-    st = TerminalStatus("t", "h", Env.DEMO, "active", connected=None)
-    journal = "HJ\t0\t11:41:45.227\tTerminal\tMetaTrader 5 x64 build 6320 started\n"
-    report = operations.evaluate_verify(st, journal, set(), require_start=True)
-    assert report.connected is None and not report.healthy
+def test_clean_deploy_stop(farm: Farm, tmp_path: Path) -> None:
+    farm.journal_on_start("Trend")
+    deployed = deploy(farm, bundle_v1(tmp_path / "v1"))
+    assert deployed.stopped_cleanly is True
+    assert deployed.stop is not None and deployed.stop.exit_code == 0

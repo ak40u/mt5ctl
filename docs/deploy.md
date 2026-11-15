@@ -103,7 +103,7 @@ Environment=DISPLAY=:91
 Environment=XAUTHORITY=/home/trader/mt5/demo1.Xauthority
 WorkingDirectory=/home/trader/mt5/demo1
 ExecStart=/usr/bin/xvfb-run -n 91 -f /home/trader/mt5/demo1.Xauthority -s "-screen 0 1280x1024x24 -nolisten tcp" /usr/bin/wine terminal64.exe /portable /skipupdate /config:cfg\\login.ini
-ExecStop=/usr/bin/wine taskkill /IM terminal64.exe
+ExecStop=/home/trader/mt5/stop-terminal.sh
 TimeoutStopSec=60
 KillMode=control-group
 Restart=on-failure
@@ -119,29 +119,47 @@ instead of prompting). With `service_scope: user`, mt5ctl uses
 
 ### Stopping cleanly
 
-`systemctl stop` alone ends the terminal with a signal, so it has no chance to
-save its profile. Ask it to close instead; Wine's `taskkill` without `/F` does
-that (observed on build 6320 with Wine 11: the terminal saves and exits within
-seconds, journal line `exit with code 0`):
+**Required.** A terminal saves its profile only when it closes itself. Killed by
+a signal, it saves nothing, and a deploy then works on charts the terminal never
+wrote back. Three things make the difference, all observed on build 6320 under
+Wine 11:
 
-```ini
-ExecStop=/usr/bin/wine taskkill /IM terminal64.exe
+1. **Ask it to close.** Wine's `taskkill` without `/F` sends the close request;
+   the terminal saves and exits within seconds, journal line `exit with code 0`.
+2. **Wait for it.** systemd sends SIGTERM to every process left in the unit as
+   soon as `ExecStop` returns. `taskkill` returns at once, so the terminal is
+   killed halfway through closing. `ExecStop` has to wait until the main process
+   is gone.
+3. **On its own display.** `ExecStop` needs the terminal's `DISPLAY` and
+   `XAUTHORITY`. Without them `taskkill` reports that it sent the request, but
+   the terminal does not close. Hence the fixed authority file passed to
+   `xvfb-run -f` in the unit above.
+
+`stop-terminal.sh`, executable, next to the terminal:
+
+```sh
+#!/bin/sh
+# Ask the terminal to close and wait until it has. Needs WINEPREFIX, DISPLAY
+# and XAUTHORITY from the unit, and $MAINPID, which systemd sets for ExecStop.
+/usr/bin/wine taskkill /IM terminal64.exe >/dev/null 2>&1
+i=0
+while [ -n "$MAINPID" ] && kill -0 "$MAINPID" 2>/dev/null && [ "$i" -lt 50 ]; do
+  sleep 1
+  i=$((i + 1))
+done
+exit 0
 ```
 
 `taskkill /IM` addresses every `terminal64.exe` in the Wine prefix, so give each
-terminal its own `WINEPREFIX`. `ExecStop` must also see the terminal's
-`DISPLAY` and `XAUTHORITY`: without them `taskkill` reports that it sent the
-close request, but the terminal does not close, and systemd ends it after
-`TimeoutStopSec` without the profile being saved (observed). That is why the unit
-gives `xvfb-run` a fixed authority file (`-f`) instead of its default temporary one.
+terminal its own `WINEPREFIX`. A modal window also keeps the terminal from
+closing — for example the "Select a company to open an account with" dialog of
+a terminal with no account to log in to, which is what you get when the
+`/config:` file cannot be read (journal: `cannot load config ... at start`).
 
-Two more things keep the close from working: a modal window, such as the
-"Select a company to open an account with" dialog of a terminal that has no
-account to log in to, and a `/config:` file the terminal cannot read (it logs
-`cannot load config ... at start` and starts without logging in). `mt5ctl stop`
-and `deploy` report a stop that systemd had to force. mt5ctl calls `systemctl stop` and then waits for
-the process to be gone, so it benefits from such a unit without any
-configuration.
+`mt5ctl stop` and `deploy` tell the two outcomes apart by the terminal's own
+journal: with its exit line, it closed itself; without, systemd had to end it,
+and mt5ctl prints a warning. (systemd's `Result` for the unit is no guide: it
+reads `exit-code` even after a clean exit.)
 
 ## Keeping the terminal build fixed
 
