@@ -95,8 +95,10 @@ BROKER_PORT = 443
 # The journal: one file per day in <data dir>/logs (Help: "Journal"), named
 # YYYYMMDD.log, UTF-16LE with BOM; lines are tab-separated:
 # <code> <severity> <time> <source> <message>. Observed (build 6320).
+# The same folder also holds other logs (MetaEditor writes metaeditor.log
+# there, observed), so only dated files are the journal.
 JOURNAL_DIR = "logs"
-JOURNAL_GLOB = "*.log"
+JOURNAL_GLOB = "[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9].log"
 
 # Journal lines (matched case-insensitively, anywhere in the line).
 # Observed (build 6320, with and without a broker account):

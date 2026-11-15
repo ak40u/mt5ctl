@@ -29,6 +29,10 @@ class TerminalStatus:
     trading_disabled: str | None = None
     """Why the account cannot trade (e.g. ``investor mode``), when the journal
     says so after the latest authorization; ``None`` otherwise."""
+    terminal_running: bool | None = None
+    """Whether the terminal's own process is in the unit; ``None`` when unknown.
+    ``False`` with an active unit: something (a Wine dialog, a crash at start)
+    keeps the terminal from running."""
     error: str | None = None
     """Set when the host could not be queried; the other fields are then empty."""
 
@@ -36,6 +40,7 @@ class TerminalStatus:
     def healthy(self) -> bool:
         return (
             self.service_state == "active"
+            and self.terminal_running is not False
             and self.connected is True
             and self.trading_disabled is None
         )
@@ -48,6 +53,7 @@ class VerifyReport:
     healthy: bool
     service_state: str
     connected: bool | None
+    terminal_running: bool | None = None
     loaded: tuple[str, ...] = ()
     pending: tuple[str, ...] = ()
     failed: tuple[str, ...] = ()
@@ -63,6 +69,8 @@ class VerifyReport:
     def detail(self) -> str:
         conn = {True: "connected", False: "NOT connected", None: "connection unknown"}
         parts = [f"service {self.service_state}"]
+        if self.terminal_running is False:
+            parts.append("NO TERMINAL PROCESS")
         if self.started is False:
             parts.append("start not in the journal yet")
         parts.append(conn[self.connected])

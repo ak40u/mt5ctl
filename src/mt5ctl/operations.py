@@ -174,7 +174,8 @@ def journal_trading_disabled(text: str) -> str | None:
 
 
 def _parse_status_line(fields: list[str], term: Terminal, host: Host) -> TerminalStatus:
-    _tid, state, active, age, estab, tail = (fields + [""] * 6)[:6]
+    _tid, state, active, age, estab, tail, procs = (fields + [""] * 7)[:7]
+    process_count = _int_or_none(procs)
     journal = decode_lenient(_unb64(tail))
     journal_state, event = journal_connection(journal)
     sockets = _int_or_none(estab)
@@ -189,6 +190,7 @@ def _parse_status_line(fields: list[str], term: Terminal, host: Host) -> Termina
         connected=connected,
         last_event=event,
         trading_disabled=journal_trading_disabled(journal),
+        terminal_running=None if process_count is None else process_count > 0,
     )
 
 
@@ -331,6 +333,7 @@ def evaluate_verify(
     )
     healthy = (
         st.service_state == "active"
+        and st.terminal_running is not False
         and started is not False
         and connected is True
         and trading_disabled is None
@@ -340,6 +343,7 @@ def evaluate_verify(
     return VerifyReport(
         healthy=healthy,
         service_state=st.service_state,
+        terminal_running=st.terminal_running,
         connected=connected,
         loaded=tuple(ok_names),
         pending=tuple(pending),
@@ -961,6 +965,12 @@ async def compile_sources(
     term = registry.terminal(terminal_id)
     host = registry.host_of(term)
     _require_live_confirmation(term, "compile on", confirm)
+    if term.wineprefix and term.wine == "wine":
+        raise CompileError(
+            f"set 'wine' for {term.id!r} to the Wine that runs the terminal: another Wine "
+            "build updates the prefix, and the terminal then stops at a Wine dialog on "
+            "its next start"
+        )
     root = Path(src_dir)
     files = collect_sources(root)
     sources = [f for f in files if f.lower().endswith(mt5spec.SOURCE_SUFFIX)]

@@ -101,3 +101,12 @@ def test_metaeditor_that_never_ran_is_an_error(
     src = sources(tmp_path / "src", {"A.mq5": "// ok"})
     with pytest.raises(CompileError, match="did not run"):
         compile_(editor, src, tmp_path / "out")
+
+
+def test_a_prefix_needs_its_own_wine(editor: Farm, tmp_path: Path) -> None:
+    from dataclasses import replace
+
+    term = editor.registry.terminals["demo1"]
+    editor.registry.terminals["demo1"] = replace(term, wineprefix="/somewhere/prefix")
+    with pytest.raises(CompileError, match="set 'wine'"):
+        compile_(editor, sources(tmp_path / "src", {"A.mq5": ""}), tmp_path / "out")

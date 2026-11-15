@@ -58,9 +58,13 @@ def _is_terminal_function() -> str:
     """
     names = "|".join(re.escape(n) for n in mt5spec.TERMINAL_EXECUTABLES)
     pattern = rf"(^|[\\/ ])({names})( |$)"
+    main_pattern = rf"(^|[\\/])({names})$"
     return (
         "is_terminal() { tr '\\000' ' ' < \"/proc/$1/cmdline\" 2>/dev/null "
-        f"| grep -qiE {sh_quote(pattern)}; }}"
+        f"| grep -qiE {sh_quote(pattern)}; }}\n"
+        # The terminal itself, not a launcher that mentions it: its first argument.
+        "is_terminal_main() { tr '\\000' '\\n' < \"/proc/$1/cmdline\" 2>/dev/null "
+        f"| head -1 | grep -qiE {sh_quote(main_pattern)}; }}"
     )
 
 
@@ -429,12 +433,15 @@ def build_status_script(
 
     Each spec is ``(terminal id, unit, scope, data dir)``. One line per terminal::
 
-        TERM|<id>|<state>|<active s|-1>|<journal age s|-1>|<estab|-1>|<b64 journal tail>
+        TERM|<id>|<state>|<active s|-1>|<journal age s|-1>|<estab|-1>|<b64 journal tail>|<procs|-1>
 
     ``active`` is the unit's uptime. ``estab`` counts established connections
     to :data:`mt5spec.BROKER_PORT` owned by the unit's terminal processes; ``-1``
     means it could not be attributed (no ``ss``, no permission, no process), not
-    "disconnected". The journal tail is decoded and searched in Python.
+    "disconnected". ``procs`` counts the terminal's own processes in the unit
+    (``-1``: the unit's cgroup could not be read), so an active unit whose
+    terminal never started shows as such. The journal tail is decoded and
+    searched in Python.
     """
     calls = "\n".join(
         f"emit {sh_quote(tid)} {sh_quote(unit)} {sh_quote(_systemctl(scope, mutate=False))} "
@@ -472,12 +479,16 @@ emit() {{
   elif [ -n "$unituser" ] && [ "$unituser" = "$CURUSER" ]; then attrib=1
   fi
   estab=-1
+  procs=-1
   cg=$($ctl show -p ControlGroup --value "$svc" 2>/dev/null)
-  if [ "$HAVE_SS" = 1 ] && [ "$attrib" = 1 ] && [ -n "$cg" ] && [ -r "/sys/fs/cgroup$cg/cgroup.procs" ]; then
-    pids=""
+  pids=""
+  if [ -n "$cg" ] && [ -r "/sys/fs/cgroup$cg/cgroup.procs" ]; then
+    procs=0
     for p in $(cat "/sys/fs/cgroup$cg/cgroup.procs"); do
-      if is_terminal "$p"; then pids="$pids $p"; fi
+      if is_terminal_main "$p"; then pids="$pids $p"; procs=$((procs + 1)); fi
     done
+  fi
+  if [ "$HAVE_SS" = 1 ] && [ "$attrib" = 1 ] && [ "$procs" != -1 ]; then
     if [ -n "$pids" ]; then
       estab=0
       for p in $pids; do
@@ -486,7 +497,7 @@ emit() {{
       done
     fi
   fi
-  echo "TERM{SEP}$id{SEP}$st{SEP}$active{SEP}$age{SEP}$estab{SEP}$tail"
+  echo "TERM{SEP}$id{SEP}$st{SEP}$active{SEP}$age{SEP}$estab{SEP}$tail{SEP}$procs"
 }}
 {calls}
 """

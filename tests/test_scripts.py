@@ -106,3 +106,37 @@ kill $T $O
 """
     out = run(script).stdout
     assert "T=yes" in out and "O=no" in out
+
+
+def test_journal_ignores_other_logs_in_the_folder(tmp_path: Path) -> None:
+    """MetaEditor writes metaeditor.log next to the journal; it sorts after it."""
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    (logs / "20261115.log").write_bytes(b"journal\n")
+    (logs / "metaeditor.log").write_bytes(b"compile log\n")
+    cursor = run(scripts.build_log_cursor_script(str(tmp_path))).stdout.strip().split("|")
+    assert base64.b64decode(cursor[1]) == b"20261115.log"
+    out = run(scripts.build_log_since_script(str(tmp_path), "", 0, 1 << 20)).stdout
+    names = [base64.b64decode(line.split("|")[1]) for line in out.splitlines()]
+    assert names == [b"20261115.log"]
+
+
+@pytest.mark.skipif(not Path("/proc/self/cmdline").exists(), reason="needs Linux /proc")
+def test_is_terminal_main_skips_launchers() -> None:
+    """xvfb-run and start.exe mention terminal64.exe in their arguments; only the
+    process whose first argument is the executable is the terminal itself."""
+    func = scripts._is_terminal_function()
+    script = f"""
+{func}
+bash -c 'exec -a "Z:\\\\home\\\\t\\\\terminal\\\\terminal64.exe" sleep 5' &
+T=$!
+sh -c 'sleep 5' terminal64.exe &
+L=$!
+sleep 0.2
+is_terminal_main $T && echo "T=main" || echo "T=no"
+is_terminal_main $L && echo "L=main" || echo "L=no"
+is_terminal $L && echo "L=related" || echo "L=unrelated"
+kill $T $L
+"""
+    out = run(script).stdout
+    assert "T=main" in out and "L=no" in out and "L=related" in out

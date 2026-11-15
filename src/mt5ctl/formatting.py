@@ -147,6 +147,8 @@ def status_lines(rows: list[TerminalStatus]) -> list[str]:
             f"{st.terminal:<14} {st.env.value:<4} {st.service_state:<10} "
             f"{conn[st.connected]:<12} {uptime:<12} {age}"
         )
+        if st.service_state == "active" and st.terminal_running is False:
+            line += "  NO TERMINAL PROCESS"
         if st.trading_disabled is not None:
             line += f"  TRADING DISABLED ({st.trading_disabled})"
         out.append(line)

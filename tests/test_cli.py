@@ -246,3 +246,13 @@ def test_status_shows_uptime_only_for_an_active_unit() -> None:
     active = TerminalStatus("t", "h", Env.DEMO, "active", active_seconds=180)
     assert "up 3m" not in status_lines([failed])[0]
     assert "up 3m" in status_lines([active])[0]
+
+
+def test_status_flags_an_active_unit_without_terminal() -> None:
+    from mt5ctl.formatting import status_lines
+    from mt5ctl.models import Env
+    from mt5ctl.results import TerminalStatus
+
+    st = TerminalStatus("t", "h", Env.DEMO, "active", connected=None, terminal_running=False)
+    assert not st.healthy
+    assert "NO TERMINAL PROCESS" in status_lines([st])[0]
