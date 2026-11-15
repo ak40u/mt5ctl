@@ -186,6 +186,16 @@ class ExpertsReport:
 
 
 @dataclass(frozen=True, slots=True)
+class Screenshot:
+    terminal: str
+    png: bytes = field(repr=False)
+
+    @property
+    def size(self) -> int:
+        return len(self.png)
+
+
+@dataclass(frozen=True, slots=True)
 class Check:
     """One line of ``doctor``: ``ok``, ``warn`` (works, with less) or ``fail``."""
 

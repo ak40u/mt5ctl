@@ -12,8 +12,10 @@ import argparse
 import asyncio
 import json
 import sys
+import time
 from collections.abc import Sequence
 from dataclasses import asdict
+from pathlib import Path
 from typing import Any
 
 from . import __version__, operations
@@ -258,6 +260,25 @@ def _cmd_experts(args: argparse.Namespace) -> int:
     return EXIT_ERROR if any(r.error for r in reports) else EXIT_OK
 
 
+def _cmd_screenshot(args: argparse.Namespace) -> int:
+    registry = load_registry(args.config)
+    shot = asyncio.run(operations.screenshot(registry, args.terminal))
+    target = (
+        Path(args.output)
+        if args.output
+        else Path(f"{args.terminal}-{time.strftime('%Y%m%d-%H%M%S')}.png")
+    )
+    if target.is_dir():
+        target = target / f"{args.terminal}-{time.strftime('%Y%m%d-%H%M%S')}.png"
+    target.write_bytes(shot.png)
+    _output(
+        args,
+        {"terminal": shot.terminal, "path": str(target), "size": shot.size},
+        [f"saved {target} ({shot.size} bytes)"],
+    )
+    return EXIT_OK
+
+
 def _cmd_init(args: argparse.Namespace) -> int:
     target = write_starter(args.path)
     print(f"wrote {target}\nedit it, then check it with: mt5ctl doctor")
@@ -435,6 +456,12 @@ def build_parser() -> argparse.ArgumentParser:
         p = with_config(with_json(sub.add_parser(name, help=help_)))
         p.add_argument("terminals", nargs="*", metavar="terminal", help="default: all")
         p.set_defaults(func=_cmd_experts)
+
+    shot = terminal_command("screenshot", "save a picture of the terminal's screen (PNG)")
+    shot.add_argument(
+        "-o", "--output", help="file or folder (default: <terminal>-<time>.png here)"
+    )
+    shot.set_defaults(func=_cmd_screenshot)
 
     init = sub.add_parser("init", help="write a starter registry (terminals.yaml)")
     init.add_argument(

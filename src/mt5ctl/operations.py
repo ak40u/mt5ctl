@@ -59,6 +59,7 @@ from .results import (
     LoginResult,
     LogsResult,
     RestartResult,
+    Screenshot,
     StopResult,
     TerminalInfo,
     TerminalStatus,
@@ -1338,6 +1339,33 @@ async def experts(
     )
     found = {r.terminal: r for group in groups for r in group}
     return [found[i] for i in ids]
+
+
+# --------------------------------------------------------------------------- #
+# Screenshot
+# --------------------------------------------------------------------------- #
+
+PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+
+
+async def screenshot(registry: Registry, terminal_id: str) -> Screenshot:
+    """Capture the terminal's whole X display as PNG (read-only)."""
+    term = registry.terminal(terminal_id)
+    host = registry.host_of(term)
+    script = scripts.build_screenshot_script(
+        term.display, term.xauthority, term.service, term.service_scope
+    )
+    result = await transport.run(host, script, timeout=90)
+    for fields in _lines(result.stdout, "SHOT"):
+        if fields and fields[0] == "ok" and len(fields) > 1:
+            png = _unb64(fields[1])
+            if png.startswith(PNG_MAGIC):
+                return Screenshot(terminal=term.id, png=png)
+            raise UsageError(f"{term.id}: the capture is not a PNG image")
+        if fields and fields[0] == "error":
+            reason = _unb64(fields[1]).decode("utf-8", "replace") if len(fields) > 1 else ""
+            raise UsageError(f"{term.id}: no screenshot: {reason.strip()}")
+    raise UsageError(f"{term.id}: no screenshot: the host printed nothing")
 
 
 # --------------------------------------------------------------------------- #

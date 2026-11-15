@@ -29,6 +29,7 @@ TOOLS = {
     "mt5_doctor": True,
     "mt5_ea_list": True,
     "mt5_autotrading": True,
+    "mt5_screenshot": True,
     "mt5_logs": True,
 }
 

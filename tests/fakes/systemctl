@@ -7,6 +7,7 @@
 #   <unit>.fail-after-<action>   does the action, then reports failure (a dropped link)
 #   <unit>.result    the Result systemd reports for the last stop (default success)
 #   <unit>.killed    the terminal does not close itself: no exit line on stop
+#   <unit>.env       the unit's Environment (show -p Environment)
 #   journal_dir      where the terminal's journal lives (for the exit line)
 #   calls            one line per state-changing call
 set -u
@@ -46,6 +47,7 @@ case "$cmd" in
       User) cat "$D/$u.user" 2>/dev/null || true ;;
       ActiveEnterTimestampMonotonic) echo 0 ;;
       Result) cat "$D/$u.result" 2>/dev/null || echo success ;;
+      Environment) cat "$D/$u.env" 2>/dev/null || true ;;
       *) echo "" ;;
     esac ;;
   *) echo "fake systemctl: unsupported command $cmd" >&2; exit 2 ;;

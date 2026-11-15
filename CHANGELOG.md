@@ -54,6 +54,9 @@ All notable changes to this project are documented here. The format follows
 - `ea-list` and `autotrading` (CLI and MCP): each chart's expert, loaded or
   failed, its own permission, and the terminal's Algo Trading button from the
   journal or the start file.
+- `screenshot` (CLI and MCP, which returns the image): the terminal's display
+  as PNG; terminals take an `xauthority` setting, and the display falls back to
+  the unit's environment.
 - `init`: a starter registry, mode 600, never overwriting.
 - `doctor` (CLI and MCP): tools on each host, units and their sudo rules,
   data folders, Wine and its prefix, journals and broker connections, read-only.

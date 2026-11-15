@@ -212,6 +212,9 @@ def _build_terminal(term_id: str, raw: dict[str, Any], hosts: dict[str, Host]) -
         else None,
         wineprefix=_plain(str(wineprefix), "wineprefix", where) if wineprefix else None,
         display=str(display) if display is not None else None,
+        xauthority=_plain(str(raw["xauthority"]), "xauthority", where)
+        if raw.get("xauthority")
+        else None,
     )
 
 

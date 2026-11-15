@@ -86,7 +86,11 @@ class Terminal:
     wineprefix: str | None = None
     """``WINEPREFIX`` for running MetaEditor (compile); Wine's default when unset."""
     display: str | None = None
-    """X display for MetaEditor under Wine, e.g. ``:99``."""
+    """The terminal's X display, e.g. ``:99``: compile runs MetaEditor on it and
+    screenshot captures it. Without it, screenshot takes the unit's DISPLAY."""
+    xauthority: str | None = None
+    """The display's X authority file (``xvfb-run -f``); the unit's XAUTHORITY
+    when unset."""
     start_command: str | None = None
     """Without systemd: the shell command that runs the terminal, started by
     mt5ctl in the data folder as a background process group (``process`` mode)."""

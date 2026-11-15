@@ -489,6 +489,7 @@ DOCTOR_OPTIONAL = {
     "Xvfb": "login runs the terminal on a private display",
     "iconv": "login reads the journal",
     "shred": "login erases its temporary file (without it: zeros, then rm)",
+    "import": "screenshot captures the display (ImageMagick)",
 }
 
 
@@ -577,6 +578,50 @@ startfile() {{
   echo "START{SEP}$1{SEP}ok{SEP}$v"
 }}
 {calls}
+"""
+
+
+def build_screenshot_script(
+    display: str | None,
+    xauthority: str | None,
+    service: str | None,
+    scope: ServiceScope,
+) -> str:
+    """Capture the terminal's whole X display as PNG, sent back on stdout.
+
+    The display and authority file come from the registry, else from the
+    unit's ``Environment``. Output: ``SHOT|ok|<b64 png>`` or
+    ``SHOT|error|<b64 reason>``. Nothing is written on the host.
+    """
+    from_unit = (
+        f"""for kv in $({_systemctl(scope, mutate=False)} show -p Environment --value {sh_quote(service)} 2>/dev/null); do
+  case "$kv" in
+    DISPLAY=*) [ -n "$DISP" ] || DISP=${{kv#DISPLAY=}} ;;
+    XAUTHORITY=*) [ -n "$XA" ] || XA=${{kv#XAUTHORITY=}} ;;
+  esac
+done"""
+        if service
+        else ""
+    )
+    return f"""\
+set +e
+{HELPERS}
+DISP={sh_quote(display or "")}
+XA={sh_quote(xauthority or "")}
+{from_unit}
+if [ -z "$DISP" ]; then
+  echo "SHOT{SEP}error{SEP}$(b64s "no display: set display (and xauthority) for this terminal")"; exit 0
+fi
+export DISPLAY="$DISP"
+[ -n "$XA" ] && export XAUTHORITY="$XA"
+if ! command -v import >/dev/null 2>&1; then
+  echo "SHOT{SEP}error{SEP}$(b64s "ImageMagick's import is not installed on the host")"; exit 0
+fi
+PNG=$(limit 30 import -window root png:- 2>/dev/null | base64 | tr -d '\\n')
+if [ -n "$PNG" ]; then echo "SHOT{SEP}ok{SEP}$PNG"; exit 0; fi
+# Failed: run it again for the reason (only then, so a capture is taken once).
+ERR=$(limit 30 import -window root png:- 2>&1 >/dev/null | head -c 400)
+echo "SHOT{SEP}error{SEP}$(b64s "${{ERR:-no image}}")"
 """
 
 

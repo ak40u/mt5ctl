@@ -215,7 +215,7 @@ Any other MCP client:
 
 | Tool | Changes state |
 |---|---|
-| `mt5_list`, `mt5_status`, `mt5_doctor`, `mt5_info`, `mt5_logs`, `mt5_ea_list`, `mt5_autotrading`, `mt5_plan`, `mt5_verify`, `mt5_chart` | no |
+| `mt5_list`, `mt5_status`, `mt5_doctor`, `mt5_info`, `mt5_logs`, `mt5_ea_list`, `mt5_autotrading`, `mt5_screenshot`, `mt5_plan`, `mt5_verify`, `mt5_chart` | no |
 | `mt5_deploy`, `mt5_adopt`, `mt5_start`, `mt5_stop`, `mt5_restart`, `mt5_compile`, `mt5_login` | yes |
 
 Then ask, for example: *"Plan deploying bundles/demo1 to demo1 and show me the
@@ -237,6 +237,7 @@ midway, the terminal is still started again and the lock released.
 | `info [terminal…]` | build, account, server, access point, broker, open positions and orders, start file: from the journal's latest session | no |
 | `ea-list [terminal…]` | each chart: symbol, timeframe, expert, loaded or failed (journal), its own Algo Trading permission | no |
 | `autotrading [terminal…]` | the Algo Trading button (from the journal, or the start file's `[Experts] Enabled`) and how many experts can trade | no |
+| `screenshot <terminal> [-o PATH]` | save a PNG of the terminal's screen (over MCP the agent gets the image) | no |
 | `logs <terminal> [-n N] [--grep RE] [--experts]` | the end of the newest journal, or of the experts' log (`Print` output) | no |
 | `deploy <terminal> <bundle>` | apply a bundle | yes |
 | `adopt <terminal> <bundle>` | record a bundle the terminal already runs as managed | manifest only |
@@ -299,7 +300,8 @@ your hosts. The full template is
 | `profile` | the chart profile mt5ctl manages, default `Default` |
 | `env` | `demo` (default) or `live` |
 | `account` | the login number, the default for `login` |
-| `wine`, `wineprefix`, `display` | for `compile`: the terminal's own Wine build, its prefix and X display. Set `wine` whenever `wineprefix` is set: another Wine build updates the prefix, and the terminal then stops at a Wine dialog on its next start |
+| `display`, `xauthority` | the terminal's X display and its authority file, for `compile` and `screenshot` (`screenshot` falls back to the unit's `DISPLAY` and `XAUTHORITY`) |
+| `wine`, `wineprefix` | for `compile` and `login`: the terminal's own Wine build and its prefix. Set `wine` whenever `wineprefix` is set: another Wine build updates the prefix, and the terminal then stops at a Wine dialog on its next start |
 
 ### Supported hosts
 

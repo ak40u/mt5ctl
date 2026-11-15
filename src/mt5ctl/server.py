@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import functools
 from collections.abc import Awaitable, Callable
-from typing import ParamSpec
+from typing import ParamSpec, TypeVar
 
 from mcp.server import MCPServer
+from mcp.server.mcpserver import Image
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
@@ -35,6 +36,7 @@ Always run mt5_plan before mt5_deploy and show the plan.
 Bundles and sources are folders on the machine running this server, not on the host."""
 
 P = ParamSpec("P")
+R = TypeVar("R")
 
 
 class Tools:
@@ -48,9 +50,9 @@ class Tools:
         return load_registry(self._config)
 
 
-def _guard(fn: Callable[P, Awaitable[str]]) -> Callable[P, Awaitable[str]]:
+def _guard(fn: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
     @functools.wraps(fn)
-    async def wrapper(*args: P.args, **kwargs: P.kwargs) -> str:
+    async def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
         try:
             return await fn(*args, **kwargs)
         except (Mt5ctlError, ValueError) as exc:
@@ -100,6 +102,17 @@ def build_server(config: str | None = None) -> MCPServer:
         start file's [Experts] Enabled) and how many experts can trade."""
         ids = None if terminal == "all" else [terminal]
         return "\n".join(fmt.autotrading_lines(await operations.experts(tools.registry, ids)))
+
+    @mcp.tool(annotations=READ_ONLY)
+    @_guard
+    async def mt5_screenshot(terminal: str) -> list[str | Image]:
+        """A picture of a terminal's screen (its whole virtual display), to see what
+        it shows: a dialog it waits at, the charts, the Algo Trading button."""
+        result = await operations.screenshot(tools.registry, terminal)
+        return [
+            f"{result.terminal}: {result.size} bytes PNG",
+            Image(data=result.png, format="png"),
+        ]
 
     @mcp.tool(annotations=READ_ONLY)
     @_guard
