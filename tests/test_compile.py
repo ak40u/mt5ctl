@@ -23,8 +23,13 @@ def sources(root: Path, files: dict[str, str]) -> Path:
 
 
 @pytest.fixture
-def editor(farm: Farm) -> Farm:
-    (farm.data / "metaeditor64.exe").write_bytes(b"MZ")
+def editor(farm: Farm, tmp_path: Path) -> Farm:
+    """The farm's terminal, moved to a data folder without spaces (MetaEditor needs it)."""
+    data = tmp_path / "build-terminal"
+    data.mkdir()
+    (data / "MetaEditor64.exe").write_bytes(b"MZ")
+    farm.data = data
+    farm.registry = make_registry(data)
     return farm
 
 
@@ -33,6 +38,8 @@ def compile_(farm: Farm, src: Path, out: Path) -> CompileResult:
 
 
 def test_compile_fetches_ex5_and_cleans_up(editor: Farm, tmp_path: Path) -> None:
+    """A folder with a space is compiled under a space-free stand-in (MetaEditor
+    skips such folders) and its .ex5 comes back under the original name."""
     src = sources(
         tmp_path / "src",
         {
@@ -61,11 +68,12 @@ def test_compile_errors_are_reported(editor: Farm, tmp_path: Path) -> None:
     assert (tmp_path / "out/Good.ex5").exists() and not (tmp_path / "out/Bad.ex5").exists()
 
 
-def test_compile_needs_metaeditor(farm: Farm, tmp_path: Path) -> None:
+def test_compile_needs_metaeditor(editor: Farm, tmp_path: Path) -> None:
+    (editor.data / "MetaEditor64.exe").unlink()
     src = sources(tmp_path / "src", {"A.mq5": "// ok"})
     with pytest.raises(CompileError, match=r"metaeditor64\.exe"):
-        compile_(farm, src, tmp_path / "out")
-    assert not list((farm.data / "MQL5/Experts").glob("mt5ctl-build-*"))
+        compile_(editor, src, tmp_path / "out")
+    assert not list((editor.data / "MQL5/Experts").glob("mt5ctl-build-*"))
 
 
 def test_compile_needs_sources(editor: Farm, tmp_path: Path) -> None:
@@ -110,3 +118,16 @@ def test_a_prefix_needs_its_own_wine(editor: Farm, tmp_path: Path) -> None:
     editor.registry.terminals["demo1"] = replace(term, wineprefix="/somewhere/prefix")
     with pytest.raises(CompileError, match="set 'wine'"):
         compile_(editor, sources(tmp_path / "src", {"A.mq5": ""}), tmp_path / "out")
+
+
+def test_compile_aliases() -> None:
+    aliases = operations.compile_aliases(
+        ["Plain", "Sub dir", "a/b c"], ["Plain", "Sub dir", "Sub_dir", "a/b c"]
+    )
+    assert aliases == {"Sub dir": "Sub_dir_1", "a/b c": "a/b_c"}
+
+
+def test_data_folder_with_a_space_is_refused(farm: Farm, tmp_path: Path) -> None:
+    (farm.data / "MetaEditor64.exe").write_bytes(b"MZ")  # the farm's folder has a space
+    with pytest.raises(CompileError, match="space in its path"):
+        compile_(farm, sources(tmp_path / "src", {"A.mq5": ""}), tmp_path / "out")

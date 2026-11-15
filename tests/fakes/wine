@@ -10,6 +10,8 @@ for a in "$@"; do
   case "$a" in /compile:*) dir="${a#/compile:}" ;; /log:*) log="${a#/log:}" ;; esac
 done
 [ -n "$dir" ] || exit 1
+# Like MetaEditor: a folder whose path has a space is skipped without a word.
+case "$dir" in *" "*) exit 1 ;; esac
 [ -n "$log" ] || log="$dir/${dir##*/}.log"
 errors=0
 for src in "$dir"/*.mq5; do

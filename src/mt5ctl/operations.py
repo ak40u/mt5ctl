@@ -918,11 +918,37 @@ def collect_sources(src_dir: str | Path) -> list[str]:
     return files
 
 
-def _pack(root: Path, rels: Iterable[str]) -> bytes:
+def compile_aliases(source_dirs: Iterable[str], all_dirs: Iterable[str]) -> dict[str, str]:
+    """A space-free stand-in for each source folder whose path has a space.
+
+    MetaEditor silently skips a ``/compile:`` folder whose path contains a space
+    (see :data:`mt5spec.COMPILE_PATH_NO_SPACES`). Such a folder is also uploaded
+    under a stand-in name, at the same depth so relative ``#include "..\\x.mqh"``
+    still resolve, and compiled there.
+    """
+    if not mt5spec.COMPILE_PATH_NO_SPACES:
+        return {}
+    taken = set(all_dirs)
+    aliases: dict[str, str] = {}
+    for folder in sorted(source_dirs):
+        if " " not in folder:
+            continue
+        base = "/".join(part.replace(" ", "_") for part in folder.split("/"))
+        alias, n = base, 1
+        while alias in taken:
+            alias, n = f"{base}_{n}", n + 1
+        taken.add(alias)
+        aliases[folder] = alias
+    return aliases
+
+
+def _pack(root: Path, rels: Iterable[str], extra: Mapping[str, str] | None = None) -> bytes:
+    """Tar *rels* from *root*; *extra* maps more member names to source files."""
+    members = [(rel, rel) for rel in rels] + list((extra or {}).items())
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w") as tar:
-        for rel in rels:
-            data = (root / rel).read_bytes()
+        for rel, source in members:
+            data = (root / source).read_bytes()
             info = tarfile.TarInfo(rel)
             info.size = len(data)
             info.mode = 0o644
@@ -930,17 +956,20 @@ def _pack(root: Path, rels: Iterable[str]) -> bytes:
     return buf.getvalue()
 
 
-def _unpack_ex5(tar_bytes: bytes, out_dir: Path, allowed: set[str]) -> None:
-    """Write the expected ``.ex5`` members of a fetched tar under *out_dir*."""
+def _unpack_ex5(tar_bytes: bytes, out_dir: Path, wanted: Mapping[str, str]) -> None:
+    """Write the wanted ``.ex5`` members of a fetched tar under *out_dir*.
+
+    *wanted* maps a member name to the path it is written to.
+    """
     with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r") as tar:
         for member in tar.getmembers():
             name = PurePosixPath(member.name).as_posix().removeprefix("./")
-            if name not in allowed or not member.isfile():
+            if name not in wanted or not member.isfile():
                 continue
             extracted = tar.extractfile(member)
             if extracted is None:
                 continue
-            target = out_dir / name
+            target = out_dir / wanted[name]
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(extracted.read())
 
@@ -971,21 +1000,34 @@ async def compile_sources(
             "build updates the prefix, and the terminal then stops at a Wine dialog on "
             "its next start"
         )
+    if mt5spec.COMPILE_PATH_NO_SPACES and " " in term.data_dir:
+        raise CompileError(
+            f"the data folder of {term.id!r} has a space in its path, and MetaEditor skips "
+            "folders whose path has one; compile on a terminal installed without spaces"
+        )
     root = Path(src_dir)
     files = collect_sources(root)
     sources = [f for f in files if f.lower().endswith(mt5spec.SOURCE_SUFFIX)]
     source_dirs = sorted({str(PurePosixPath(s).parent) for s in sources})
+    aliases = compile_aliases(source_dirs, {str(PurePosixPath(f).parent) for f in files})
+
+    def compiled_as(rel: str) -> str:
+        folder = str(PurePosixPath(rel).parent)
+        return f"{aliases[folder]}/{PurePosixPath(rel).name}" if folder in aliases else rel
+
+    stand_ins = {compiled_as(f): f for f in files if str(PurePosixPath(f).parent) in aliases}
+    targets = {compiled_as(s): s for s in sources}  # what MetaEditor compiles -> source
     work = f"{EXPERTS_DIR}/mt5ctl-build-{uuid.uuid4().hex[:12]}"
     out = Path(out_dir)
     try:
-        await transport.put_tar(host, _pack(root, files), f"{term.data_dir}/{work}")
+        await transport.put_tar(host, _pack(root, files, stand_ins), f"{term.data_dir}/{work}")
         result = await transport.run(
             host,
             scripts.build_compile_script(
                 term.data_dir,
                 work,
-                source_dirs,
-                sources,
+                sorted({str(PurePosixPath(t).parent) for t in targets}),
+                sorted(targets),
                 wine=term.wine,
                 wineprefix=term.wineprefix,
                 display=term.display,
@@ -1015,8 +1057,14 @@ async def compile_sources(
                 "'wine' (MetaTrader 5 needs a recent Wine), 'wineprefix' and 'display' in "
                 "the registry"
             )
-        compiled = sorted(s for s in sources if built.get(s))
-        ex5 = {str(PurePosixPath(s).with_suffix(mt5spec.EX5_SUFFIX)) for s in compiled}
+        compiled = sorted(src for target, src in targets.items() if built.get(target))
+        ex5 = {
+            str(PurePosixPath(target).with_suffix(mt5spec.EX5_SUFFIX)): str(
+                PurePosixPath(src).with_suffix(mt5spec.EX5_SUFFIX)
+            )
+            for target, src in targets.items()
+            if built.get(target)
+        }
         if ex5:
             fetched = await transport.run(
                 host, scripts.build_fetch_script(term.data_dir, work, sorted(ex5))

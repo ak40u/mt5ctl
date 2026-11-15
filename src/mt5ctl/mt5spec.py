@@ -163,6 +163,11 @@ COMPILE_RESULT_RE = re.compile(
     r"result:\s*(\d+)\s+errors?,\s*(\d+)\s+warnings?", re.IGNORECASE
 )
 
+# MetaEditor silently skips a /compile: folder whose path contains a space: no
+# log, no .ex5. File names with spaces inside a space-free folder compile fine.
+# Observed (build 6320, Wine 11.20).
+COMPILE_PATH_NO_SPACES = True
+
 # MetaEditor's exit code is not documented (and unreliable under Wine), so a
 # compile succeeds only if every source has a fresh .ex5 and no log reports errors.
 EX5_SUFFIX = ".ex5"

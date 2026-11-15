@@ -143,6 +143,7 @@ def farm_config(farm: Farm, tmp_path: Path) -> Path:
         f"    service: {UNIT}\n    service_scope: user\n"
         f"  live1:\n    host: here\n    data_dir: '{farm.data}'\n"
         f"    service: {UNIT}\n    service_scope: user\n    env: live\n"
+        f"  build1:\n    host: here\n    data_dir: '{tmp_path / 'build-terminal'}'\n"
     )
     return config
 
@@ -202,13 +203,15 @@ def test_adopt_and_compile_commands(
     assert main(["adopt", "demo1", str(bundle), "--config", str(farm_config)]) == EXIT_OK
     assert "adopted 2 files on demo1" in capsys.readouterr().out
 
-    (farm.data / "metaeditor64.exe").write_bytes(b"MZ")
+    build = tmp_path / "build-terminal"  # MetaEditor needs a path without spaces
+    build.mkdir()
+    (build / "MetaEditor64.exe").write_bytes(b"MZ")
     src = tmp_path / "src"
     src.mkdir()
     (src / "A.mq5").write_text("// ok")
     (src / "B.mq5").write_text("#error no")
     out_dir = tmp_path / "out"
-    code = main(["compile", "demo1", str(src), str(out_dir), "--config", str(farm_config)])
+    code = main(["compile", "build1", str(src), str(out_dir), "--config", str(farm_config)])
     assert code == EXIT_ERROR
     out = capsys.readouterr().out
     assert "ok     A.mq5" in out and "FAILED B.mq5" in out
