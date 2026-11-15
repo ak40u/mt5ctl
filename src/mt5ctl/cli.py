@@ -612,6 +612,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     except KeyboardInterrupt:
         print("mt5ctl: interrupted", file=sys.stderr)
         return EXIT_INTERRUPTED
+    except (OSError, ValueError) as exc:
+        # A missing file, a bad argument: say so, without a traceback.
+        print(f"mt5ctl: error: {exc}", file=sys.stderr)
+        return EXIT_ERROR
 
 
 def entrypoint() -> None:

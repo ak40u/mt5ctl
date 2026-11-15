@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import subprocess
 import tarfile
 from pathlib import Path
 
@@ -79,3 +80,14 @@ def test_put_tar_extracts_into_a_new_folder(tmp_path: Path) -> None:
 def test_put_tar_failure_is_raised(tmp_path: Path) -> None:
     with pytest.raises(RemoteCommandError, match="upload failed"):
         asyncio.run(transport.put_tar(LOCAL, b"not a tar", str(tmp_path / "x")))
+
+
+def test_a_script_cut_short_runs_nothing(tmp_path: Path) -> None:
+    """bash runs a piped script as it arrives; a cut-off one must not run its start."""
+    marker = tmp_path / "ran"
+    script = transport.wrap(f"touch '{marker}'\necho done")
+    cut = script[: script.index("echo done")]
+    out = subprocess.run(["bash"], input=cut, capture_output=True, text=True, check=False)
+    assert out.returncode != 0 and not marker.exists()
+    whole = subprocess.run(["bash"], input=script, capture_output=True, text=True, check=False)
+    assert whole.stdout.strip() == "done" and marker.exists()

@@ -135,6 +135,17 @@ async def _exec(host: Host, argv: list[str], stdin: bytes, timeout: float) -> Co
     )
 
 
+def wrap(script: str) -> str:
+    """The script as one function, called on the last line.
+
+    bash runs a script read from a pipe as it arrives; a stream cut short would
+    run the part that got through (a ``rm -rf "$DIR/"<path>`` cut between its
+    quotes removes the whole folder). Defined as a function, nothing runs
+    until the whole body has been read.
+    """
+    return f"__mt5ctl_main() {{\n{script}\n}}\n__mt5ctl_main\n"
+
+
 async def run(
     host: Host, script: str, *, timeout: float = 60.0, check: bool = True
 ) -> CommandResult:
@@ -144,7 +155,7 @@ async def run(
     :class:`RemoteCommandError`; scripts that report their outcome on stdout
     pass ``check=False``. A timeout always raises.
     """
-    payload = base64.b64encode(script.encode("utf-8"))
+    payload = base64.b64encode(wrap(script).encode("utf-8"))
     result = await _exec(host, build_argv(host), payload, timeout)
     if check and not result.ok:
         raise RemoteCommandError(host.id, result.returncode, result.stderr)

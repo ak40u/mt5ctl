@@ -221,6 +221,7 @@ probe() {{
   if [ -f "$DIR/$2" ]; then echo "EXPERT{SEP}$1{SEP}$(sha "$DIR/$2" 2>/dev/null)"; fi
 }}
 {probes}
+echo "END{SEP}state"
 """
 
 
@@ -258,6 +259,10 @@ def parse_state_output(
                 digests[rel] = f"sha256:{sha}" if sha else None
     except (binascii.Error, ValueError, IndexError) as exc:
         raise StateError(f"unreadable state output from the terminal host: {exc}") from None
-    if not seen_manifest:
+    if not seen_manifest or not any(
+        line.startswith(f"END{SEP}") for line in stdout.splitlines()[-3:]
+    ):
+        # A cut-off answer would make managed charts look missing and foreign
+        # ones vanish from the reference and numbering checks.
         raise StateError("state output from the terminal host is truncated")
     return assemble_state(manifest_raw, charts, digests, paths, order)

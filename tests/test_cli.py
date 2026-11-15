@@ -259,3 +259,11 @@ def test_status_flags_an_active_unit_without_terminal() -> None:
     st = TerminalStatus("t", "h", Env.DEMO, "active", connected=None, terminal_running=False)
     assert not st.healthy
     assert "NO TERMINAL PROCESS" in status_lines([st])[0]
+
+
+def test_missing_file_is_an_error_not_a_traceback(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert main(["chart", "show", str(tmp_path / "none.chr")]) == EXIT_ERROR
+    err = capsys.readouterr().err
+    assert err.startswith("mt5ctl: error:") and "Traceback" not in err

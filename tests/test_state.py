@@ -133,12 +133,12 @@ def test_parse_rejects_garbage(line: str) -> None:
 def test_parse_reports_corrupt_manifest() -> None:
     token = base64.b64encode(b"{oops").decode()
     with pytest.raises(ManifestError, match="corrupt"):
-        parse_state_output(f"MANIFEST|{token}\n", "Default", [])
+        parse_state_output(f"MANIFEST|{token}\nEND|state\n", "Default", [])
 
 
 def test_unreadable_expert_and_chart_map_to_none() -> None:
     name = base64.b64encode(b"chart01.chr").decode()
-    out = f"MANIFEST|MISSING\nCHART|{name}|\nEXPERT|0|\n"
+    out = f"MANIFEST|MISSING\nCHART|{name}|\nEXPERT|0|\nEND|state\n"
     st = parse_state_output(out, "Default", [CHART1, EXPERT])
     assert st.files == {EXPERT: None, CHART1: None}
     assert st.unresolved_charts == {CHART1}
@@ -162,3 +162,10 @@ def test_sh_quote_round_trips_through_bash(value: str) -> None:
     if bash is None:
         pytest.skip("bash not available")
     assert run_script(f"printf '%s' {sh_quote(value)}") == value
+
+
+def test_cut_off_state_output_is_refused() -> None:
+    """Without the end marker, charts may be missing from the answer."""
+    name = base64.b64encode(b"chart01.chr").decode()
+    with pytest.raises(StateError, match="truncated"):
+        parse_state_output(f"MANIFEST|MISSING\nCHART|{name}|\n", "Default", [])
