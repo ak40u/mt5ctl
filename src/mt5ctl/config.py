@@ -143,6 +143,7 @@ def _build_terminal(term_id: str, raw: dict[str, Any], hosts: dict[str, Host]) -
     if display is not None and not _DISPLAY_RE.fullmatch(str(display)):
         raise ConfigError(f"{where}: display {display!r} must look like ':99'")
     wineprefix = raw.get("wineprefix")
+    wine = str(raw.get("wine", "wine"))
     return Terminal(
         id=term_id,
         host=host_id,
@@ -151,6 +152,7 @@ def _build_terminal(term_id: str, raw: dict[str, Any], hosts: dict[str, Host]) -
         env=env,
         service=str(service) if service is not None else None,
         service_scope=scope,
+        wine=_plain(wine, "wine", where),
         wineprefix=_plain(str(wineprefix), "wineprefix", where) if wineprefix else None,
         display=str(display) if display is not None else None,
     )

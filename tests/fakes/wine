@@ -3,6 +3,8 @@
 # in the folder (not recursively) unless the source contains '#error', and
 # writes the /log:<file> in UTF-16LE with the summary line MetaEditor writes.
 set -u
+# `wine winepath -w <path>`: the fake understands host paths directly.
+if [ "${1:-}" = winepath ]; then shift; [ "${1:-}" = -w ] && shift; printf '%s\n' "$1"; exit 0; fi
 dir=""; log=""
 for a in "$@"; do
   case "$a" in /compile:*) dir="${a#/compile:}" ;; /log:*) log="${a#/log:}" ;; esac

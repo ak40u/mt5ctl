@@ -77,6 +77,9 @@ class Terminal:
     service: str | None = None
     """systemd unit running the terminal; required by deploy, status and restart."""
     service_scope: ServiceScope = ServiceScope.SYSTEM
+    wine: str = "wine"
+    """Wine to run MetaEditor with (compile); a path when the terminal uses its own
+    Wine build rather than the one on PATH."""
     wineprefix: str | None = None
     """``WINEPREFIX`` for running MetaEditor (compile); Wine's default when unset."""
     display: str | None = None

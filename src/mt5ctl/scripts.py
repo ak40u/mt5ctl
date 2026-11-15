@@ -503,6 +503,7 @@ def build_compile_script(
     source_dirs: Iterable[str],
     sources: Iterable[str],
     *,
+    wine: str,
     wineprefix: str | None,
     display: str | None,
     timeout_s: int,
@@ -523,8 +524,8 @@ def build_compile_script(
         env.append(f"export DISPLAY={sh_quote(display)}")
     compiles = "\n".join(
         f'd="$WORK/"{sh_quote(d)}; log="$WORK/.build-{i}.log"; '
-        f'limit {int(timeout_s)} wine "$ME" /portable "/compile:$(winepath -w "$d")" '
-        f'"/include:$INC" "/log:$(winepath -w "$log")" >/dev/null 2>&1; rc=$?; '
+        f'limit {int(timeout_s)} "$WINE" "$ME" /portable "/compile:$(winpath "$d")" '
+        f'"/include:$INC" "/log:$(winpath "$log")" >/dev/null 2>&1; rc=$?; '
         f'echo "RC{SEP}$(b64s {sh_quote(d)}){SEP}$rc"'
         for i, d in enumerate(source_dirs)
     )
@@ -542,8 +543,10 @@ DIR={sh_quote(data_dir)}
 WORK="$DIR/"{sh_quote(work)}
 ME=$(find "$DIR" -maxdepth 1 -type f -iname {sh_quote(mt5spec.METAEDITOR_EXE)} | head -1)
 [ -n "$ME" ] || {{ echo "ERROR{SEP}$(b64s "no {mt5spec.METAEDITOR_EXE} in the data folder")"; exit 1; }}
-command -v wine >/dev/null 2>&1 || {{ echo "ERROR{SEP}$(b64s "wine is not installed")"; exit 1; }}
-INC=$(winepath -w "$DIR/MQL5")
+WINE={sh_quote(wine)}
+command -v "$WINE" >/dev/null 2>&1 || {{ echo "ERROR{SEP}$(b64s "wine not found: $WINE")"; exit 1; }}
+winpath() {{ "$WINE" winepath -w "$1" 2>/dev/null | tr -d '\r'; }}
+INC=$(winpath "$DIR/MQL5")
 {compiles}
 {checks}
 find "$WORK" -name '*.log' -type f | while IFS= read -r f; do

@@ -976,6 +976,7 @@ async def compile_sources(
                 work,
                 source_dirs,
                 sources,
+                wine=term.wine,
                 wineprefix=term.wineprefix,
                 display=term.display,
                 timeout_s=COMPILE_TIMEOUT_S,
@@ -998,6 +999,12 @@ async def compile_sources(
             for f in _lines(result.stdout, "LOG")
             if len(f) >= 2
         }
+        if not logs and not any(built.values()):
+            raise CompileError(
+                "MetaEditor wrote no log and no .ex5: it did not run. Check the terminal's "
+                "'wine' (MetaTrader 5 needs a recent Wine), 'wineprefix' and 'display' in "
+                "the registry"
+            )
         compiled = sorted(s for s in sources if built.get(s))
         ex5 = {str(PurePosixPath(s).with_suffix(mt5spec.EX5_SUFFIX)) for s in compiled}
         if ex5:

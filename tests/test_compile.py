@@ -86,3 +86,18 @@ def test_compile_on_live_needs_confirmation(editor: Farm, tmp_path: Path) -> Non
     editor.registry = make_registry(editor.data, env=Env.LIVE)
     with pytest.raises(ConfirmationRequiredError):
         compile_(editor, sources(tmp_path / "src", {"A.mq5": ""}), tmp_path / "out")
+
+
+def test_metaeditor_that_never_ran_is_an_error(
+    editor: Farm, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    (fake / "wine").write_text(
+        '#!/bin/sh\n[ "$1" = winepath ] && { echo "$3"; exit 0; }\nexit 1\n'
+    )
+    (fake / "wine").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{fake}:/usr/bin:/bin")
+    src = sources(tmp_path / "src", {"A.mq5": "// ok"})
+    with pytest.raises(CompileError, match="did not run"):
+        compile_(editor, src, tmp_path / "out")
