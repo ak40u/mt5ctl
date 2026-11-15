@@ -131,3 +131,26 @@ def test_data_folder_with_a_space_is_refused(farm: Farm, tmp_path: Path) -> None
     (farm.data / "MetaEditor64.exe").write_bytes(b"MZ")  # the farm's folder has a space
     with pytest.raises(CompileError, match="space in its path"):
         compile_(farm, sources(tmp_path / "src", {"A.mq5": ""}), tmp_path / "out")
+
+
+def test_failed_compile_is_a_failed_mcp_call(editor: Farm, tmp_path: Path) -> None:
+    """A client reading isError must not take a broken build for a good one."""
+    import json
+
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    from mt5ctl.server import build_server
+
+    src = sources(tmp_path / "src", {"Good.mq5": "// ok", "Bad.mq5": "#error broken"})
+    config = tmp_path / "t.yaml"
+    config.write_text(
+        "hosts:\n  here: {kind: local}\n"
+        f"terminals:\n  demo1:\n    host: here\n    data_dir: '{editor.data}'\n"
+    )
+    server = build_server(str(config))
+    args = {"terminal": "demo1", "sources": str(src), "out": str(tmp_path / "out")}
+    with pytest.raises(ToolError, match=r"FAILED.*Bad\.mq5"):
+        asyncio.run(server.call_tool("mt5_compile", args))
+    (src / "Bad.mq5").unlink()
+    ok = asyncio.run(server.call_tool("mt5_compile", args))
+    assert "Good.mq5" in json.dumps(ok, default=str)

@@ -262,3 +262,24 @@ def test_mcp_login(farm: Farm, tmp_path: Path) -> None:
     text = json.dumps(out, default=str)
     assert "logged in" in text
     assert SECRET not in text
+
+
+def test_mcp_refused_login_is_a_failed_call(farm: Farm, tmp_path: Path) -> None:
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    (farm.systemd / "login-refuse").touch()
+    config = tmp_path / "t.yaml"
+    config.write_text(
+        "hosts:\n  here: {kind: local}\n"
+        f"terminals:\n  demo1:\n    host: here\n    data_dir: '{farm.data}'\n"
+        "    service: mt5-demo1.service\n    service_scope: user\n"
+    )
+    args = {
+        "terminal": "demo1",
+        "server": "Broker-Demo",
+        "account": "1001",
+        "password": SECRET,
+    }
+    with pytest.raises(ToolError, match="REFUSED") as err:
+        asyncio.run(build_server(str(config)).call_tool("mt5_login", args))
+    assert SECRET not in str(err.value)

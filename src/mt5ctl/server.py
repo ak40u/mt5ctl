@@ -256,7 +256,10 @@ def build_server(config: str | None = None) -> MCPServer:
             confirm=confirm,
             verify_timeout=verify_timeout,
         )
-        return "\n".join(fmt.login_lines(result))
+        text = "\n".join(fmt.login_lines(result))
+        if not result.ok:
+            raise ToolError(text)
+        return text
 
     @mcp.tool(annotations=READ_ONLY)
     @_guard
@@ -292,7 +295,11 @@ def build_server(config: str | None = None) -> MCPServer:
         result = await operations.compile_sources(
             tools.registry, terminal, sources, out, confirm=confirm
         )
-        return "\n".join(fmt.compile_lines(result))
+        text = "\n".join(fmt.compile_lines(result))
+        if not result.ok:
+            # A failed build is a failed call (isError), with MetaEditor's account.
+            raise ToolError(text)
+        return text
 
     return mcp
 
