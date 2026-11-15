@@ -146,6 +146,24 @@ class RestartResult:
 
 
 @dataclass(frozen=True, slots=True)
+class LoginResult:
+    terminal: str
+    account: str
+    server: str
+    outcome: str
+    """``ok``, ``failed`` (the broker refused), ``timeout`` or ``error``."""
+    detail: str = ""
+    """The journal line of a refusal, or what went wrong."""
+    restarted: bool = False
+    verify: VerifyReport | None = None
+    """Health after the terminal was started again, when the login went through."""
+
+    @property
+    def ok(self) -> bool:
+        return self.outcome == "ok"
+
+
+@dataclass(frozen=True, slots=True)
 class CompileResult:
     compiled: tuple[str, ...]
     """Sources (relative to the source folder) that produced an ``.ex5``."""

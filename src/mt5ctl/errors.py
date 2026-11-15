@@ -38,6 +38,14 @@ class StateError(Mt5ctlError):
     """A terminal's current state could not be collected or read back."""
 
 
+class CredentialError(Mt5ctlError):
+    """No password could be found for a login."""
+
+
+class LoginError(Mt5ctlError):
+    """A login could not be carried out."""
+
+
 class DeployError(Mt5ctlError):
     """A deploy, adopt or restart cannot proceed safely, or its apply failed."""
 

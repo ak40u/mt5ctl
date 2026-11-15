@@ -25,6 +25,7 @@ from pathlib import Path, PurePosixPath
 import anyio
 
 from . import mt5spec, scripts, transport
+from .auth import resolve_password
 from .bundle import (
     EXPERTS_DIR,
     Bundle,
@@ -37,6 +38,7 @@ from .errors import (
     CompileError,
     ConfirmationRequiredError,
     DeployError,
+    LoginError,
     RemoteCommandError,
 )
 from .manifest import MANIFEST_RELPATH, Manifest
@@ -46,6 +48,7 @@ from .results import (
     AdoptResult,
     CompileResult,
     DeployResult,
+    LoginResult,
     RestartResult,
     StopResult,
     TerminalStatus,
@@ -957,6 +960,101 @@ async def adopt(
         drifted=tuple(sorted(p for p, d in recorded.items() if d != bundle.files[p])),
         foreign=tuple(sorted(c for c in state.charts if c not in bundle.files)),
         manifest_path=f"{term.data_dir}/{MANIFEST_RELPATH}",
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Login
+# --------------------------------------------------------------------------- #
+
+LOGIN_WAIT_S = 120
+
+
+async def login(
+    registry: Registry,
+    terminal_id: str,
+    *,
+    server: str,
+    account: str | None = None,
+    password: str | None = None,
+    confirm: bool = False,
+    wait_s: int = LOGIN_WAIT_S,
+    verify_timeout: float | None = None,
+) -> LoginResult:
+    """Log a terminal in once, headless; afterwards it logs in by itself.
+
+    The terminal is stopped, started once with a temporary start config that
+    holds the login (the terminal keeps the password, ``KeepPrivate=1``), and
+    closed as soon as its journal shows the authorization; then it is started
+    again as usual and verified. To log in by itself from then on, its own
+    start config must name the account and server without a password (see
+    :data:`mt5spec.START_CONFIG_LOGIN`). The temporary config is shredded
+    whatever happens, and the terminal is always started again.
+    """
+    term = registry.terminal(terminal_id)
+    host = registry.host_of(term)
+    _require_live_confirmation(term, "log in", confirm)
+    _require_supervisor(term, "login")
+    login_account = account or term.account
+    if not login_account:
+        raise LoginError(f"{term.id!r} has no account in the registry; pass the account")
+    secret = resolve_password(login_account, password)
+    # Built (and validated) before anything is stopped: a bad value must never
+    # leave the terminal down.
+    try:
+        script = scripts.build_login_script(
+            term.data_dir,
+            account=login_account,
+            server=server,
+            password=secret,
+            wine=term.wine,
+            wineprefix=term.wineprefix,
+            service=term.service,
+            scope=term.service_scope,
+            wait_s=wait_s,
+        )
+    except ValueError as exc:
+        raise LoginError(str(exc)) from None
+    outcome, detail = "error", ""
+    restarted = False
+    report: VerifyReport | None = None
+    timeout = _verify_window(verify_timeout, VERIFY_TIMEOUT_S)
+    async with _locked(host, term):
+        expected = await _live_experts(registry, term)
+        with anyio.CancelScope(shield=True):
+            await _stop_and_drain(host, term)
+        try:
+            result = await transport.run(host, script, check=False, timeout=wait_s + 120)
+            for fields in _lines(result.stdout, "LOGIN"):
+                outcome = fields[0] if fields else "error"
+                detail = (
+                    _unb64(fields[1]).decode("utf-8", "replace") if len(fields) > 1 else ""
+                )
+        except RemoteCommandError as exc:
+            # Never echo the script: it holds the password. stderr does not.
+            outcome, detail = "error", str(exc)
+        finally:
+            with anyio.CancelScope(shield=True):
+                await _control(host, term, "start")
+                restarted = True
+        if outcome == "ok":
+            report = await _verify(
+                registry,
+                term,
+                _since_latest_start(host, term),
+                expected,
+                timeout=timeout,
+                interval=VERIFY_INTERVAL_S,
+                require_start=True,
+            )
+    return LoginResult(
+        terminal=term.id,
+        account=login_account,
+        server=server,
+        outcome=outcome,
+        detail=detail,
+        restarted=restarted,
+        verify=report,
     )
 
 

@@ -1,8 +1,42 @@
 #!/usr/bin/env bash
-# wine + metaeditor64.exe stand-in. For /compile:<folder> it "compiles" every .mq5
-# in the folder (not recursively) unless the source contains '#error', and
-# writes the /log:<file> in UTF-16LE with the summary line MetaEditor writes.
+# wine + metaeditor64.exe + terminal64.exe stand-in.
+#
+# metaeditor64.exe: for /compile:<folder> it "compiles" every .mq5 in the folder
+# (not recursively) unless the source contains '#error', and writes the
+# /log:<file> in UTF-16LE with the summary line MetaEditor writes.
+#
+# terminal64.exe /config:<ini>: copies the start config it was given to
+# $FAKE_SYSTEMD/login-seen.ini, appends an "authorized" journal line (or, with
+# $FAKE_SYSTEMD/login-refuse present, an "authorization ... failed" line, or
+# with login-silent nothing at all) and runs until `wine taskkill`.
 set -u
+if [ "${1:-}" = taskkill ]; then
+  echo "taskkill $*" >> "$FAKE_SYSTEMD/calls"
+  : > "$FAKE_SYSTEMD/terminal.quit"; exit 0
+fi
+if [ "${1:-}" = terminal64.exe ]; then
+  echo "terminal $*" >> "$FAKE_SYSTEMD/calls"
+  rm -f "$FAKE_SYSTEMD/terminal.quit"
+  cfg=""
+  for a in "$@"; do case "$a" in /config:*) cfg="${a#/config:}" ;; esac; done
+  cfg="${cfg//\\//}"
+  [ -n "$cfg" ] && cp "$cfg" "$FAKE_SYSTEMD/login-seen.ini"
+  login=$(tr -d '\r' < "$cfg" | sed -n 's/^Login=//p')
+  server=$(tr -d '\r' < "$cfg" | sed -n 's/^Server=//p')
+  mkdir -p logs
+  journal=$(ls -1 logs/[0-9]*.log 2>/dev/null | sort | tail -1)
+  [ -n "$journal" ] || journal=logs/20261115.log
+  line=""
+  if [ -e "$FAKE_SYSTEMD/login-refuse" ]; then
+    line="'$login': authorization on $server failed (Invalid account)"
+  elif [ ! -e "$FAKE_SYSTEMD/login-silent" ]; then
+    line="'$login': authorized on $server"
+  fi
+  sleep 1
+  [ -n "$line" ] && printf '0\t12:00:01.000\tNetwork\t%s\r\n' "$line" | iconv -f UTF-8 -t UTF-16LE >> "$journal"
+  while [ ! -e "$FAKE_SYSTEMD/terminal.quit" ]; do sleep 0.2; done
+  exit 0
+fi
 # `wine winepath -w <path>`: the fake understands host paths directly.
 if [ "${1:-}" = winepath ]; then shift; [ "${1:-}" = -w ] && shift; printf '%s\n' "$1"; exit 0; fi
 dir=""; log=""

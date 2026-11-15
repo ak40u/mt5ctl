@@ -24,6 +24,7 @@ TOOLS = {
     "mt5_start": False,
     "mt5_stop": False,
     "mt5_compile": False,
+    "mt5_login": False,
 }
 
 

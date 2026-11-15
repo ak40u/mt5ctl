@@ -158,6 +158,7 @@ def _build_terminal(term_id: str, raw: dict[str, Any], hosts: dict[str, Host]) -
         data_dir=_plain(_required(raw, "data_dir", where), "data_dir", where),
         profile=profile,
         env=env,
+        account=_plain(str(raw["account"]), "account", where) if raw.get("account") else None,
         service=str(service) if service is not None else None,
         service_scope=scope,
         wine=_plain(wine, "wine", where),

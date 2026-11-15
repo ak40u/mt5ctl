@@ -10,6 +10,7 @@ from .results import (
     AdoptResult,
     CompileResult,
     DeployResult,
+    LoginResult,
     RestartResult,
     StopResult,
     TerminalStatus,
@@ -182,6 +183,29 @@ def stop_lines(result: StopResult) -> list[str]:
         f"(systemd Result={result.unit_result})",
         f"warning: {UNCLEAN_STOP}",
     ]
+
+
+def login_lines(result: LoginResult) -> list[str]:
+    head = f"login {result.terminal}: account {result.account} on {result.server}: "
+    text = {
+        "ok": "logged in; the terminal keeps the password",
+        "failed": f"REFUSED by the broker ({result.detail})",
+        "timeout": "no authorization in the journal in time; check the server name",
+        "error": f"could not log in ({result.detail})",
+    }.get(result.outcome, result.outcome)
+    lines = [head + text]
+    if not result.restarted:
+        lines.append("WARNING: terminal not started")
+    elif result.verify is None:
+        lines.append("terminal started again")
+    else:
+        lines.append(f"started again: {result.verify.detail}")
+        if result.verify.connected is not True:
+            lines.append(
+                "  to log in by itself, its start config (/config:) must name the account: "
+                "[Common] Login=<account> and Server=<server>, without a password"
+            )
+    return lines
 
 
 def compile_lines(result: CompileResult) -> list[str]:

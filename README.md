@@ -214,7 +214,7 @@ Any other MCP client:
 | Tool | Changes state |
 |---|---|
 | `mt5_list`, `mt5_status`, `mt5_plan`, `mt5_verify`, `mt5_chart` | no |
-| `mt5_deploy`, `mt5_adopt`, `mt5_start`, `mt5_stop`, `mt5_restart`, `mt5_compile` | yes |
+| `mt5_deploy`, `mt5_adopt`, `mt5_start`, `mt5_stop`, `mt5_restart`, `mt5_compile`, `mt5_login` | yes |
 
 Then ask, for example: *"Plan deploying bundles/demo1 to demo1 and show me the
 plan"*, *"Deploy it"*, *"Is demo1 healthy?"*. If the client gives up on a deploy
@@ -235,6 +235,7 @@ midway, the terminal is still started again and the lock released.
 | `start <terminal>` / `stop <terminal>` | start or stop through systemd; `stop` says whether the terminal closed itself | starts / stops it |
 | `restart <terminal>` | restart through systemd, then verify | restarts it |
 | `compile <terminal> <src> <out>` | build `.ex5` from `.mq5` with the terminal's MetaEditor | temporary folder |
+| `login <terminal> --server S [--account N] --password-stdin` | log the terminal in once, headless; it keeps the password and logs in by itself after ([docs](docs/deploy.md#logging-in)) | restarts it |
 | `serve` | run the MCP server (stdio) | — |
 
 | Exit code | Meaning |
@@ -289,6 +290,7 @@ your hosts. The full template is
 | `start_command`, `stop_command` | without systemd: mt5ctl runs the terminal itself ([process mode](docs/deploy.md#without-systemd-process-mode)) |
 | `profile` | the chart profile mt5ctl manages, default `Default` |
 | `env` | `demo` (default) or `live` |
+| `account` | the login number, the default for `login` |
 | `wine`, `wineprefix`, `display` | for `compile`: the terminal's own Wine build, its prefix and X display. Set `wine` whenever `wineprefix` is set: another Wine build updates the prefix, and the terminal then stops at a Wine dialog on its next start |
 
 ### Supported hosts
@@ -334,6 +336,10 @@ needs no sudo.
   `TRADING DISABLED (investor mode)` or `ALGO TRADING OFF` and exit with code 3.
   `[Experts] Enabled=1` in the start config switches Algo Trading on at every
   start ([docs/deploy.md](docs/deploy.md#algo-trading)).
+- **No password on disk in the clear.** `login` passes it on stdin, writes it
+  only to a temporary file (mode 600) that is shredded afterwards, and the
+  terminal keeps it in its own store; the start config names the account
+  without a password ([docs/deploy.md](docs/deploy.md#logging-in)).
 - **Not rolled back on a slow start.** If verify fails after a deploy, the files
   are as intended; mt5ctl reports what has not loaded (exit code 3) instead of
   undoing a correct deploy because the broker reconnected slowly.

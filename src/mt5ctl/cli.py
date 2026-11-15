@@ -248,6 +248,26 @@ def _cmd_compile(args: argparse.Namespace) -> int:
     return EXIT_OK if result.ok else EXIT_ERROR
 
 
+def _cmd_login(args: argparse.Namespace) -> int:
+    password = None
+    if args.password_stdin:
+        password = sys.stdin.readline().rstrip("\r\n")
+    registry = load_registry(args.config)
+    result = asyncio.run(
+        operations.login(
+            registry,
+            args.terminal,
+            server=args.server,
+            account=args.account,
+            password=password,
+            confirm=args.confirm_live,
+            verify_timeout=args.verify_timeout,
+        )
+    )
+    _output(args, asdict(result), fmt.login_lines(result))
+    return EXIT_OK if result.ok else EXIT_ERROR
+
+
 def _cmd_serve(args: argparse.Namespace) -> int:
     from .server import serve
 
@@ -377,6 +397,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--timeout", type=float, metavar="SECONDS", help="keep checking this long"
     )
     verify.set_defaults(func=_cmd_verify)
+
+    login = with_verify(
+        with_live(terminal_command("login", "log a terminal in once, headless"))
+    )
+    login.add_argument(
+        "--server", required=True, help="broker server, e.g. ExampleBroker-Demo"
+    )
+    login.add_argument("--account", help="login number (default: the registry's account)")
+    login.add_argument(
+        "--password-stdin",
+        action="store_true",
+        help="read the password from stdin (otherwise MT5CTL_PASSWORD_<account> or "
+        "the credentials file)",
+    )
+    login.set_defaults(func=_cmd_login)
 
     comp = with_live(
         terminal_command("compile", "compile .mq5 sources with the terminal's MetaEditor")

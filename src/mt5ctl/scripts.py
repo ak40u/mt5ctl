@@ -665,3 +665,134 @@ DIR={sh_quote(data_dir)}
 rm -rf "$DIR/"{sh_quote(relpath)}
 echo "REMOVED{SEP}ok"
 """
+
+
+# --------------------------------------------------------------------------- #
+# Login
+# --------------------------------------------------------------------------- #
+
+_LOGIN_ACCOUNT_RE = re.compile(r"[0-9]{1,20}")
+_LOGIN_SERVER_RE = re.compile(r"[A-Za-z0-9._:-]{1,128}")
+
+
+_LOGIN_EOF = "MT5CTL_LOGIN_CONFIG"
+
+
+def build_login_script(
+    data_dir: str,
+    *,
+    account: str,
+    server: str,
+    password: str,
+    wine: str,
+    wineprefix: str | None,
+    service: str | None,
+    scope: ServiceScope,
+    wait_s: int,
+) -> str:
+    """One headless login: the terminal saves the password and logs in by itself after.
+
+    Writes a temporary start config (mode 600) with the login, password and
+    server, and ``KeepPrivate=1`` so the terminal keeps the password; starts the
+    terminal once with it on a private Xvfb display; waits until the journal
+    shows the authorization (or its failure); closes the terminal the way it
+    closes normally (``taskkill`` on its display); and, from an ``EXIT`` trap
+    that runs whatever happens, shreds the config. Prints ``LOGIN|ok``,
+    ``LOGIN|failed|<b64 journal line>`` or ``LOGIN|timeout``.
+
+    The password is in the script body only, which reaches the host over the
+    SSH connection's stdin: it is never in a command line, a log or the output.
+    """
+    if not _LOGIN_ACCOUNT_RE.fullmatch(account):
+        raise ValueError(f"account must be a login number, got {account!r}")
+    if not _LOGIN_SERVER_RE.fullmatch(server):
+        raise ValueError(f"invalid server name {server!r}")
+    if not password or any(c in password for c in "\r\n\0") or password == _LOGIN_EOF:
+        raise ValueError("the password must be one non-empty line")
+    prefix = (
+        f"WP={sh_quote(wineprefix)}"
+        if wineprefix
+        else (
+            f"WP=$({_systemctl(scope, mutate=False)} show -p Environment --value "
+            f"{sh_quote(service)} 2>/dev/null | tr ' ' '\\n' | sed -n 's/^WINEPREFIX=//p' | head -1)"
+            if service
+            else 'WP=""'
+        )
+    )
+    return f"""\\
+set +e
+{HELPERS}
+DIR={sh_quote(data_dir)}
+WINE={sh_quote(wine)}
+{prefix}
+[ -n "$WP" ] && export WINEPREFIX="$WP"
+export WINEDEBUG=-all
+STATE="$DIR/{STATE_DIR}"
+mkdir -p "$STATE"
+INI=""; TPID=""; XPID=""; DISP="${{DISPLAY:-}}"
+shred_file() {{
+  [ -f "$1" ] || return 0
+  if command -v shred >/dev/null 2>&1; then shred -u "$1" 2>/dev/null && return 0; fi
+  dd if=/dev/zero of="$1" bs=1 count="$(fsize "$1")" conv=notrunc 2>/dev/null
+  rm -f "$1"
+}}
+cleanup() {{
+  if [ -n "$TPID" ] && kill -0 "$TPID" 2>/dev/null; then
+    (cd "$DIR" && DISPLAY="$DISP" "$WINE" taskkill /IM terminal64.exe) >/dev/null 2>&1
+    i=0; while kill -0 "$TPID" 2>/dev/null && [ "$i" -lt 30 ]; do sleep 1; i=$((i + 1)); done
+    kill -TERM -- "-$TPID" 2>/dev/null; sleep 1; kill -KILL -- "-$TPID" 2>/dev/null
+  fi
+  case "$WINE" in */*) WS="${{WINE%/*}}/wineserver" ;; *) WS=wineserver ;; esac
+  command -v "$WS" >/dev/null 2>&1 && "$WS" -k 2>/dev/null
+  [ -n "$XPID" ] && kill "$XPID" 2>/dev/null
+  [ -n "$INI" ] && shred_file "$INI"
+}}
+trap cleanup EXIT HUP INT TERM
+umask 077
+T=$(mktemp "$STATE/login.XXXXXX") || {{ echo "LOGIN{SEP}error{SEP}$(b64s "cannot create the login file")"; exit 1; }}
+INI="$T.ini"
+mv -f "$T" "$INI" || {{ rm -f "$T"; echo "LOGIN{SEP}error{SEP}$(b64s "cannot create the login file")"; exit 1; }}
+awk '{{ printf "%s\\r\\n", $0 }}' > "$INI" <<'{_LOGIN_EOF}'
+[Common]
+Login={account}
+Password={password}
+Server={server}
+KeepPrivate=1
+NewsEnable=0
+{_LOGIN_EOF}
+J0=$(ls -1 "$DIR"/{_JOURNAL} 2>/dev/null | sort | tail -1)
+S0=0; [ -n "$J0" ] && S0=$(fsize "$J0")
+since() {{
+  {{
+    [ -n "$J0" ] && [ -f "$J0" ] && tail -c +$((S0 + 1)) "$J0"
+    for f in "$DIR"/{_JOURNAL}; do
+      [ -f "$f" ] || continue
+      if [ -z "$J0" ] || [ "${{f##*/}}" \\> "${{J0##*/}}" ]; then cat "$f"; fi
+    done
+  }} | iconv -f UTF-16LE -t UTF-8 2>/dev/null | tr -d '\\r'
+}}
+if command -v Xvfb >/dev/null 2>&1; then
+  for n in $(seq 150 199); do
+    if [ ! -e "/tmp/.X$n-lock" ] && [ ! -e "/tmp/.X11-unix/X$n" ]; then
+      Xvfb ":$n" -screen 0 1280x1024x24 -nolisten tcp -ac >/dev/null 2>&1 &
+      XPID=$!; DISP=":$n"; sleep 2; break
+    fi
+  done
+fi
+cd "$DIR" || {{ echo "LOGIN{SEP}error{SEP}$(b64s "no data folder")"; exit 1; }}
+set -m
+DISPLAY="$DISP" "$WINE" terminal64.exe /portable /skipupdate "/config:{STATE_DIR}\\\\${{INI##*/}}" >/dev/null 2>&1 &
+TPID=$!
+set +m
+for _ in $(seq 1 {int(wait_s)}); do
+  text=$(since)
+  if printf '%s\\n' "$text" | grep -qiE {sh_quote(mt5spec.LOG_AUTHORIZED_RE.pattern)}; then
+    echo "LOGIN{SEP}ok"; exit 0
+  fi
+  bad=$(printf '%s\\n' "$text" | grep -iE {sh_quote(mt5spec.LOG_AUTH_FAILED_RE.pattern)} | tail -1)
+  if [ -n "$bad" ]; then echo "LOGIN{SEP}failed{SEP}$(b64s "$bad")"; exit 0; fi
+  kill -0 "$TPID" 2>/dev/null || {{ echo "LOGIN{SEP}error{SEP}$(b64s "the terminal exited")"; exit 0; }}
+  sleep 1
+done
+echo "LOGIN{SEP}timeout"
+"""

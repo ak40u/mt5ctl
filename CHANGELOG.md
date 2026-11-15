@@ -45,5 +45,11 @@ All notable changes to this project are documented here. The format follows
   explains a chart the terminal saved without its expert.
 - `compile` handles folders with spaces through a space-free stand-in.
 - Process mode: `start_command` / `stop_command` run a terminal without systemd.
+- Changing commands on a terminal with `env: live` are refused without
+  `--confirm` (`confirm=true` over MCP).
+- `login` (CLI and MCP `mt5_login`): one headless login with the password from
+  stdin, the environment or a private credentials file; the temporary start
+  file is shredded and the terminal started again and verified. Terminals take
+  an `account` setting.
 - CLI: `chart show`, `bundle check`, `plan`, `list`, `deploy`, `adopt`, `status`,
-  `restart`, `verify`, `compile`, `serve`, all with `--json`.
+  `restart`, `verify`, `compile`, `login`, `serve`, all with `--json`.

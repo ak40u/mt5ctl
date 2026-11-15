@@ -25,6 +25,7 @@ CHANGING_TOOLS = (
     "mt5_stop",
     "mt5_restart",
     "mt5_compile",
+    "mt5_login",
 )
 
 
@@ -51,11 +52,14 @@ def cli_args(command: str, bundle: Path, src: Path, tmp_path: Path) -> list[str]
         "deploy": [str(bundle)],
         "adopt": [str(bundle)],
         "compile": [str(src), str(tmp_path / "out")],
+        "login": ["--server", "Broker-Demo", "--account", "1001"],
     }.get(command, [])
     return [command, "live1", *extra]
 
 
-@pytest.mark.parametrize("command", ["deploy", "adopt", "start", "stop", "restart", "compile"])
+@pytest.mark.parametrize(
+    "command", ["deploy", "adopt", "start", "stop", "restart", "compile", "login"]
+)
 def test_cli_refuses_without_confirm(
     command: str,
     farm: Farm,
@@ -83,6 +87,8 @@ def mcp_args(tool: str, bundle: Path, src: Path, tmp_path: Path) -> dict[str, ob
         args["bundle"] = str(bundle)
     if tool == "mt5_compile":
         args |= {"sources": str(src), "out": str(tmp_path / "out")}
+    if tool == "mt5_login":
+        args |= {"server": "Broker-Demo", "account": "1001", "password": "pw"}
     return args
 
 

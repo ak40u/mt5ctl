@@ -102,7 +102,7 @@ Environment=WINEDEBUG=-all
 Environment=DISPLAY=:91
 Environment=XAUTHORITY=/home/trader/mt5/demo1.Xauthority
 WorkingDirectory=/home/trader/mt5/demo1
-ExecStart=/usr/bin/xvfb-run -n 91 -f /home/trader/mt5/demo1.Xauthority -s "-screen 0 1280x1024x24 -nolisten tcp" /usr/bin/wine terminal64.exe /portable /skipupdate /config:cfg\\login.ini
+ExecStart=/usr/bin/xvfb-run -n 91 -f /home/trader/mt5/demo1.Xauthority -s "-screen 0 1280x1024x24 -nolisten tcp" /usr/bin/wine terminal64.exe /portable /skipupdate /config:cfg\\start.ini
 ExecStop=/home/trader/mt5/stop-terminal.sh
 TimeoutStopSec=60
 KillMode=control-group
@@ -182,7 +182,7 @@ terminals:
     start_command: >-
       export WINEPREFIX=/home/trader/mt5/demo1-prefix;
       exec xvfb-run -n 91 -f /home/trader/mt5/demo1.Xauthority
-      wine terminal64.exe /portable /skipupdate '/config:cfg\login.ini'
+      wine terminal64.exe /portable /skipupdate '/config:cfg\start.ini'
     stop_command: >-
       WINEPREFIX=/home/trader/mt5/demo1-prefix DISPLAY=:91
       XAUTHORITY=/home/trader/mt5/demo1.Xauthority
@@ -201,6 +201,46 @@ terminals:
 What you give up: nothing restarts the terminal if it crashes or the host
 reboots. Use a systemd unit where you can; process mode is for where you cannot.
 
+## Logging in
+
+A terminal under a unit has no one to type its password into the login dialog.
+`mt5ctl login` logs it in once, headless, and the terminal keeps the password
+(in `Config/accounts.dat`, which mt5ctl never touches):
+
+```sh
+mt5ctl login demo1 --server ExampleBroker-Demo --account 12345678 --password-stdin < password.txt
+```
+
+It stops the terminal, starts it once on a private virtual display with a
+temporary start file holding the login, closes it as soon as the journal shows
+the authorization (or the broker's refusal), shreds that file, starts the
+terminal again the usual way and verifies it. Nothing stops it from starting
+again: an error, a timeout or Ctrl-C included.
+
+The password comes, in this order, from stdin (`--password-stdin`; `password`
+over MCP), the `MT5CTL_PASSWORD_<account>` environment variable, or the
+`<account>` key of `~/.config/mt5ctl/credentials.json` (or `$MT5CTL_CREDENTIALS`),
+which must be `chmod 600`. It is never on a command line, in a log or in the
+output: it reaches the host inside the script on SSH's stdin, and the temporary
+file is created with mode 600 and shredded when the script ends.
+
+For the terminal to log in by itself after that, its own start file (the one
+the unit passes with `/config:`) names the account and server, **without a
+password**:
+
+```ini
+[Common]
+Login=12345678
+Server=ExampleBroker-Demo
+[Experts]
+Enabled=1
+```
+
+Observed (build 6320): with this file the terminal logs in with the saved
+password at every start. Started with `/login:<account>` instead, or with no
+start file, it opens the login dialog and waits there; `login` then reports
+`NOT connected` after the restart. Run `login` again when the password changes.
+
 ## Algo Trading
 
 The terminal's **Algo Trading** button must be on for any expert to trade. Its
@@ -213,7 +253,8 @@ it from disk. What is observed (build 6320):
   every start, overriding a manual "off".
 
 So the way to have it on without a GUI is that start file — the one the unit
-passes with `/config:` (the same file that logs the terminal in):
+passes with `/config:` (the same file that names the account, see
+[Logging in](#logging-in)):
 
 ```ini
 [Experts]

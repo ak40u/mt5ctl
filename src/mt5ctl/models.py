@@ -74,6 +74,8 @@ class Terminal:
     profile: str = DEFAULT_PROFILE
     """Chart profile mt5ctl manages (``MQL5/Profiles/Charts/<profile>``)."""
     env: Env = Env.DEMO
+    account: str | None = None
+    """Login number, the default for ``login``."""
     service: str | None = None
     """systemd unit running the terminal. Either this or :attr:`start_command`
     is needed by deploy, start, stop, restart and status."""

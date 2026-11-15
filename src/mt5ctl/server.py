@@ -30,7 +30,7 @@ mt5_verify, mt5_chart (read a local .chr file).
 Changing, and refused for a terminal with env=live unless confirm=true:
 mt5_deploy (apply a local bundle: stop, back up, apply, start, verify),
 mt5_adopt (record a bundle the terminal already runs, before the first deploy),
-mt5_start, mt5_stop, mt5_restart, mt5_compile.
+mt5_start, mt5_stop, mt5_restart, mt5_compile, mt5_login (one headless login).
 Always run mt5_plan before mt5_deploy and show the plan.
 Bundles and sources are folders on the machine running this server, not on the host."""
 
@@ -165,6 +165,36 @@ def build_server(config: str | None = None) -> MCPServer:
         """
         result = await operations.stop(tools.registry, terminal, confirm=confirm)
         return "\n".join(fmt.stop_lines(result))
+
+    @mcp.tool(annotations=CHANGES)
+    @_guard
+    async def mt5_login(
+        terminal: str,
+        server: str,
+        account: str | None = None,
+        password: str | None = None,
+        confirm: bool = False,
+        verify_timeout: float | None = None,
+    ) -> str:
+        """Log a terminal in once, headless; afterwards it logs in by itself.
+
+        Stops the terminal, logs in with a temporary config that is shredded
+        afterwards, starts it again and waits until it is healthy. Leave password empty to use
+        MT5CTL_PASSWORD_<account> or the credentials file on this machine; the
+        password is never shown or logged.
+
+        A terminal with env=live is refused unless confirm=true.
+        """
+        result = await operations.login(
+            tools.registry,
+            terminal,
+            server=server,
+            account=account,
+            password=password,
+            confirm=confirm,
+            verify_timeout=verify_timeout,
+        )
+        return "\n".join(fmt.login_lines(result))
 
     @mcp.tool(annotations=READ_ONLY)
     @_guard

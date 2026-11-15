@@ -130,7 +130,19 @@ LOG_TERMINAL_EXIT_RE = re.compile(r"exit with code (-?\d+)", re.IGNORECASE)
 JOURNAL_LEVEL_COLUMN = 1
 JOURNAL_LEVEL_ERROR = "2"
 LOG_TERMINAL_STARTED_RE = re.compile(r"MetaTrader 5 .*build \d+ started", re.IGNORECASE)
-LOG_AUTHORIZED_RE = re.compile(r"authorized on (\S+)", re.IGNORECASE)
+LOG_AUTHORIZED_RE = re.compile(r"authorized on ([^ ]+)", re.IGNORECASE)
+# A rejected login. MT4 heritage ("authorization on <server> failed"); the
+# MetaTrader 5 wording has not been observed.
+# These two are also run by grep -E on the host, so they stay POSIX ERE.
+LOG_AUTH_FAILED_RE = re.compile(
+    r"authorization on [^ ]+ failed|invalid account", re.IGNORECASE
+)
+# Logging in without a password on disk. Observed (build 6320): once the
+# terminal has logged in with KeepPrivate=1 (the password saved in
+# Config/accounts.dat), a start config naming the account and server, without
+# a password, logs it in by itself. Started with /login:<account>, or with no
+# config at all, it opens the login dialog instead and waits there.
+START_CONFIG_LOGIN = "[Common]\r\nLogin={account}\r\nServer={server}\r\n"
 LOG_CONNECTION_LOST_RE = re.compile(
     r"connection to .* lost|no connection|disconnected from", re.IGNORECASE
 )
