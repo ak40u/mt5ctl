@@ -47,5 +47,6 @@ terminals:
   farm-build:
     host: farm
     data_dir: /home/trader/mt5/build
+    wine: /opt/wine-staging/bin/wine   # the Wine build that runs this terminal
     wineprefix: /home/trader/.wine-mt5
     display: ":99"

@@ -35,5 +35,10 @@ All notable changes to this project are documented here. The format follows
   without trading.
 - `status` and `verify` report an account whose trading is disabled (investor
   password) as not healthy.
+- `start` and `stop` commands (CLI and MCP); `stop` and `deploy` tell from the
+  terminal's journal whether it closed itself or systemd had to end it.
+- `status` and `verify` report an active unit whose terminal process is not
+  running, and need a confirmed broker connection for "healthy".
+- Terminals take a `wine` setting; `compile` requires it when a `wineprefix` is set.
 - CLI: `chart show`, `bundle check`, `plan`, `list`, `deploy`, `adopt`, `status`,
   `restart`, `verify`, `compile`, `serve`, all with `--json`.

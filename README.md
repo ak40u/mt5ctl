@@ -214,7 +214,7 @@ Any other MCP client:
 | Tool | Changes state |
 |---|---|
 | `mt5_list`, `mt5_status`, `mt5_plan`, `mt5_verify`, `mt5_chart` | no |
-| `mt5_deploy`, `mt5_adopt`, `mt5_restart`, `mt5_compile` | yes |
+| `mt5_deploy`, `mt5_adopt`, `mt5_start`, `mt5_stop`, `mt5_restart`, `mt5_compile` | yes |
 
 Then ask, for example: *"Plan deploying bundles/demo1 to demo1 and show me the
 plan"*, *"Deploy it"*, *"Is demo1 healthy?"*. If the client gives up on a deploy
@@ -228,10 +228,11 @@ midway, the terminal is still started again and the lock released.
 | `bundle check <dir>` | validate a bundle | no |
 | `list` | registered terminals | no |
 | `plan <terminal> <bundle>` | what a deploy would change | no |
-| `status [terminal…]` | service state, broker connection, journal age | no |
+| `status [terminal…]` | service state, terminal process, broker connection, journal age | no |
 | `verify <terminal>` | service, connection, every chart's expert loaded | no |
 | `deploy <terminal> <bundle>` | apply a bundle | yes |
 | `adopt <terminal> <bundle>` | record a bundle the terminal already runs as managed | manifest only |
+| `start <terminal>` / `stop <terminal>` | start or stop through systemd; `stop` says whether the terminal closed itself | starts / stops it |
 | `restart <terminal>` | restart through systemd, then verify | restarts it |
 | `compile <terminal> <src> <out>` | build `.ex5` from `.mq5` with the terminal's MetaEditor | temporary folder |
 | `serve` | run the MCP server (stdio) | — |
@@ -287,7 +288,7 @@ your hosts. The full template is
 | `service_scope` | `system` (default, via `sudo -n systemctl`) or `user` (`systemctl --user`) |
 | `profile` | the chart profile mt5ctl manages, default `Default` |
 | `env` | `demo` (default) or `live` |
-| `wineprefix`, `display` | for `compile`: Wine prefix and X display of MetaEditor |
+| `wine`, `wineprefix`, `display` | for `compile`: the terminal's own Wine build, its prefix and X display. Set `wine` whenever `wineprefix` is set: another Wine build updates the prefix, and the terminal then stops at a Wine dialog on its next start |
 
 ### Supported hosts
 
