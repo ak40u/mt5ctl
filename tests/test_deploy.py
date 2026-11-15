@@ -718,3 +718,18 @@ def test_status_of_a_stopped_terminal_ignores_its_old_journal(
     farm.set_state("inactive")
     (st,) = asyncio.run(operations.status(farm.registry))
     assert (st.connected, st.trading_disabled, st.algo_trading) == (None, None, None)
+
+
+def test_status_judges_the_connection_by_the_current_session(farm: Farm) -> None:
+    """Without sockets to go by, an earlier session's login is not a connection now."""
+    lines = [
+        "0\t11:00:00.000\tTerminal\tMetaTrader 5 x64 build 6320 started for MetaQuotes",
+        "0\t11:00:01.000\tNetwork\t'1': authorized on Broker-Demo",
+        "0\t11:30:00.000\tTerminal\texit with code 0",
+        "0\t12:00:00.000\tTerminal\tMetaTrader 5 x64 build 6320 started for MetaQuotes",
+    ]
+    logs = farm.data / "logs"
+    logs.mkdir()
+    (logs / "20261115.log").write_bytes(("\r\n".join(lines) + "\r\n").encode("utf-16-le"))
+    (st,) = asyncio.run(operations.status(farm.registry))
+    assert st.connected is None

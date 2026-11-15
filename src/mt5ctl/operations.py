@@ -196,8 +196,8 @@ def _parse_status_line(fields: list[str], term: Terminal, host: Host) -> Termina
     _tid, state, active, age, estab, tail, procs = (fields + [""] * 7)[:7]
     process_count = _int_or_none(procs)
     journal = decode_lenient(_unb64(tail))
-    journal_state, event = journal_connection(journal)
     session = since_latest_start(journal)
+    journal_state, event = journal_connection(session)
     sockets = _int_or_none(estab)
     connected = (sockets > 0) if sockets is not None else journal_state
     running = state == "active"
@@ -213,7 +213,7 @@ def _parse_status_line(fields: list[str], term: Terminal, host: Host) -> Termina
         journal_age_seconds=_int_or_none(age),
         connected=connected,
         last_event=event,
-        trading_disabled=journal_trading_disabled(journal) if running else None,
+        trading_disabled=journal_trading_disabled(session) if running else None,
         terminal_running=None if process_count is None else process_count > 0,
         algo_trading=journal_algo_trading(session) if running else None,
     )
