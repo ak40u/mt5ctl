@@ -37,7 +37,7 @@ digits=5
 <expert>
 name=Trend EURUSD H4
 path=Experts\Portfolio\Trend EURUSD H4.ex5
-expertmode=33
+expertmode=1
 <inputs>
 RiskPerTrade=100.0
 MagicNumber=1001
@@ -81,9 +81,16 @@ Timeframe codes observed on build 6320:
 The other minute and hour timeframes follow the same scheme. W1 and MN1 have
 not been observed yet, so mt5ctl does not read or write them.
 
-The layout of the `<expert>` block (`name`, `path`, `expertmode`, `<inputs>`)
-follows the MetaTrader 4 chart format; `expertmode` is kept as a number and not
-interpreted.
+The `<expert>` block (observed on build 6320, with an expert attached in the
+terminal and saved on a normal exit) sits directly in `<chart>`, before the
+first `<window>`, and holds `name=`, `path=` (relative to `MQL5`, with
+backslashes), `expertmode=` and an `<inputs>` block of `name=value` lines.
+
+Bit 0 of `expertmode` is the expert's own "Allow Algo Trading" checkbox:
+unticking it turns `expertmode=1` into `expertmode=0` and changes nothing else.
+mt5ctl reads it as `Expert.algo_trading`, and `bundle check` warns about charts
+whose expert would load without trading. The other bits have not been observed;
+the value is otherwise kept as a number.
 
 Only the `<expert>` section directly inside `<chart>` is the chart's expert
 advisor. Indicators carry their own `<inputs>` inside `<window>` blocks; mt5ctl
@@ -126,6 +133,16 @@ from one template, give each a fresh value.
 ## The order file
 
 Next to the charts, each profile folder holds `order.wnd`: the chart file names,
-one per line, in window order (UTF-16LE with BOM, CRLF after every line). A
-deploy keeps it in step with the profile: names of charts it removes are
+one per line, in window order (UTF-16LE with BOM, CRLF after every line). The
+terminal also opens chart files the list does not mention, and rewrites the list
+when it saves the profile (observed on build 6320). A deploy still keeps it in
+step, so it never lists a chart that is gone: names of charts it removes are
 dropped, charts it adds are appended, and every other entry keeps its place.
+
+## Numbering and ids
+
+When it saves a profile, the terminal closes gaps in chart numbering: with
+`chart05` and `chart06` missing, `chart07.chr` comes back as `chart05.chr`. It
+also replaces a chart `id=` that two files share with the highest id plus one.
+Both observed on build 6320. The id change is harmless (it is not part of the
+fingerprint); the renumbering is why a deploy refuses to leave gaps.

@@ -74,9 +74,15 @@ Then `mt5ctl plan` shows what a deploy would still change.
 
 Charts are files `chart01.chr`, `chart02.chr`, … in the profile folder. A
 foreign chart (a watchdog, say) occupies its number; number your bundle's
-charts around it so that, together, they run without gaps. `plan` warns when the
-profile after the deploy would have gaps, because a terminal that closes gaps
-when it saves the profile would shift charts onto other file names.
+charts around it so that, together, they run without gaps.
+
+The terminal closes gaps itself when it saves the profile (see
+[chart-format.md](chart-format.md#numbering-and-ids)): a managed chart would
+come back under another file name, and the next deploy would place its strategy
+a second time. So `plan` reports any gap the deploy would leave, `deploy`
+refuses, and the fix is to renumber the bundle. Removing a chart from the middle
+counts too: to drop `chart02` while a foreign `chart03` stays, move another of
+your charts into `chart02`, or give that slot a chart without an expert.
 
 ## systemd unit
 

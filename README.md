@@ -19,10 +19,10 @@ over MCP.
 ---
 
 > **Pre-release.** Every command works end to end in the test suite, which runs
-> the real shell scripts against a simulated terminal, and the file formats are
-> checked against files saved by MetaTrader 5 build 6320. A few details MetaQuotes
-> does not document are still assumptions; they are listed under
-> [Limitations](#limitations). Try it on a demo terminal first.
+> the real shell scripts against a simulated terminal, and the file formats,
+> expert block included, are checked against files saved by MetaTrader 5 build
+> 6320. A few journal lines are still assumptions; see [Limitations](#limitations).
+> Try it on a demo terminal first.
 
 ## Why
 
@@ -261,7 +261,11 @@ bundles/demo1/
 - A chart without an expert is fine — for example, to put a symbol into Market
   Watch for currency conversion.
 - Number charts so that, together with the foreign charts on the terminal, they
-  run `chart01`, `chart02`, … without gaps; `plan` warns otherwise.
+  run `chart01`, `chart02`, … without gaps. The terminal closes gaps itself when
+  it saves the profile, which would move a managed chart to another file name,
+  so a deploy that would leave a gap is refused.
+- `bundle check` warns about charts whose expert has "Allow Algo Trading"
+  unticked: they load, but do not trade.
 - Anything else in the folder (sources, notes, logs) is ignored. Symlinks,
   absolute paths and `..` are refused.
 
@@ -328,11 +332,12 @@ needs no sudo.
 
 ## Limitations
 
-- **Unconfirmed details.** The layout of a chart's `<expert>` block and the
-  meaning of `expertmode` follow MetaTrader 4 and have not yet been checked
-  against a chart saved by MetaTrader 5; the journal lines for broker
-  authorization and failed expert loads likewise. Every such assumption is in one
-  module, [`mt5spec.py`](src/mt5ctl/mt5spec.py), each with its source.
+- **Unconfirmed details.** The journal lines for broker authorization, lost
+  connections and failed expert loads follow MetaTrader 4 and have not yet been
+  seen from MetaTrader 5; for the connection, verify uses the terminal's sockets
+  where it can. Of `expertmode`, only the "Allow Algo Trading" bit is
+  known. Every assumption about undocumented behaviour is in one module,
+  [`mt5spec.py`](src/mt5ctl/mt5spec.py), each with its source.
 - **Timeframes.** Minute and hour timeframes and D1 are supported; W1 and MN1 are
   not yet.
 - **systemd only.** Changing a terminal needs a systemd unit; there is no

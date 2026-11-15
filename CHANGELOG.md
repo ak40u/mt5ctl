@@ -27,6 +27,11 @@ All notable changes to this project are documented here. The format follows
   output rather than exit code.
 - MCP server (`mt5ctl serve`) with read-only and destructive tools annotated.
 - `mt5spec`: every assumption about undocumented terminal behaviour in one
-  module.
+  module, checked against files saved by MetaTrader 5 build 6320 (chart and
+  expert blocks, timeframe codes, the order file, journal and compile logs).
+- A deploy that would leave gaps in chart numbering is refused: the terminal
+  renumbers charts to close gaps when it saves the profile.
+- `Expert.algo_trading`; `bundle check` warns about experts that would load
+  without trading.
 - CLI: `chart show`, `bundle check`, `plan`, `list`, `deploy`, `adopt`, `status`,
   `restart`, `verify`, `compile`, `serve`, all with `--json`.
