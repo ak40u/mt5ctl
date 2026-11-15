@@ -122,7 +122,7 @@ def test_a_prefix_needs_its_own_wine(editor: Farm, tmp_path: Path) -> None:
 
 def test_compile_aliases() -> None:
     aliases = operations.compile_aliases(
-        ["Plain", "Sub dir", "a/b c"], ["Plain", "Sub dir", "Sub_dir", "a/b c"]
+        ["Plain", "Sub dir", "a", "a/b c"], ["Plain", "Sub dir", "Sub_dir", "a", "a/b c"]
     )
     assert aliases == {"Sub dir": "Sub_dir_1", "a/b c": "a/b_c"}
 
@@ -154,3 +154,40 @@ def test_failed_compile_is_a_failed_mcp_call(editor: Farm, tmp_path: Path) -> No
     (src / "Bad.mq5").unlink()
     ok = asyncio.run(server.call_tool("mt5_compile", args))
     assert "Good.mq5" in json.dumps(ok, default=str)
+
+
+def test_mirror_keeps_the_include_tree() -> None:
+    """Sub dir/child/EA.mq5 includes ..\\Common.mqh and include\\Other.mqh: both
+    must be there next to the stand-in it is compiled as."""
+    files = [
+        "Sub dir/Common.mqh",
+        "Sub dir/child/EA.mq5",
+        "Sub dir/child/include/Other.mqh",
+        "Plain/B.mq5",
+        "Top.mqh",
+    ]
+    stand_ins, targets = operations.compile_layout(files)
+    assert targets == {
+        "Sub_dir/child/EA.mq5": "Sub dir/child/EA.mq5",
+        "Plain/B.mq5": "Plain/B.mq5",
+    }
+    assert stand_ins == {
+        "Sub_dir/Common.mqh": "Sub dir/Common.mqh",
+        "Sub_dir/child/EA.mq5": "Sub dir/child/EA.mq5",
+        "Sub_dir/child/include/Other.mqh": "Sub dir/child/include/Other.mqh",
+    }
+
+
+def test_mirror_names_stay_consistent_on_a_collision() -> None:
+    files = ["A B/x/EA.mq5", "A B/Common.mqh", "A_B/other.mqh"]
+    stand_ins, targets = operations.compile_layout(files)
+    assert targets == {"A_B_1/x/EA.mq5": "A B/x/EA.mq5"}
+    assert stand_ins["A_B_1/Common.mqh"] == "A B/Common.mqh"
+
+
+def test_hidden_files_are_not_uploaded(tmp_path: Path) -> None:
+    src = sources(
+        tmp_path / "src",
+        {"A.mq5": "// ok", ".env": "TOKEN=x", ".git/config": "[core]", "inc/.cache/x": "y"},
+    )
+    assert operations.collect_sources(src) == ["A.mq5"]

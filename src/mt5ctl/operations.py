@@ -1977,6 +1977,8 @@ def collect_sources(src_dir: str | Path) -> list[str]:
         rel = item.relative_to(root).as_posix()
         if item.is_symlink():
             raise CompileError(f"source folder contains a symlink (refused): {rel!r}")
+        if any(part.startswith(".") for part in PurePosixPath(rel).parts):
+            continue  # .git, .env, editor state: never sent to the host
         if item.is_file() and not rel.lower().endswith(_SKIPPED_SOURCES):
             files.append(rel)
     if not any(f.lower().endswith(mt5spec.SOURCE_SUFFIX) for f in files):
@@ -1984,28 +1986,57 @@ def collect_sources(src_dir: str | Path) -> list[str]:
     return files
 
 
-def compile_aliases(source_dirs: Iterable[str], all_dirs: Iterable[str]) -> dict[str, str]:
-    """A space-free stand-in for each source folder whose path has a space.
+def compile_aliases(dirs: Iterable[str], all_dirs: Iterable[str]) -> dict[str, str]:
+    """A space-free stand-in for every folder of *dirs* whose path has a space.
 
     MetaEditor silently skips a ``/compile:`` folder whose path contains a space
-    (see :data:`mt5spec.COMPILE_PATH_NO_SPACES`). Such a folder is also uploaded
-    under a stand-in name, at the same depth so relative ``#include "..\\x.mqh"``
-    still resolve, and compiled there.
+    (see :data:`mt5spec.COMPILE_PATH_NO_SPACES`). Every such folder of the
+    upload, sources and includes alike, is also uploaded under a stand-in
+    name at the same depth, and the stand-ins are consistent: a folder's
+    stand-in sits in its parent's stand-in. So the whole tree around a source
+    is mirrored, and relative ``#include "..\\x.mqh"`` or ``"inc\\y.mqh"``
+    resolve in the mirror as in the original.
     """
     if not mt5spec.COMPILE_PATH_NO_SPACES:
         return {}
     taken = set(all_dirs)
     aliases: dict[str, str] = {}
-    for folder in sorted(source_dirs):
+    for folder in sorted(set(dirs), key=lambda d: (d.count("/"), d)):
         if " " not in folder:
             continue
-        base = "/".join(part.replace(" ", "_") for part in folder.split("/"))
+        parent, _, leaf = folder.rpartition("/")
+        head = aliases.get(parent, parent) if parent else ""
+        base = (f"{head}/" if head else "") + leaf.replace(" ", "_")
         alias, n = base, 1
         while alias in taken:
             alias, n = f"{base}_{n}", n + 1
         taken.add(alias)
         aliases[folder] = alias
     return aliases
+
+
+def compile_layout(files: list[str]) -> tuple[dict[str, str], dict[str, str]]:
+    """``(stand_ins, targets)`` for an upload of *files*.
+
+    *stand_ins* maps each extra member (a file of a mirrored folder, see
+    :func:`compile_aliases`) to its source file; *targets* maps each source
+    MetaEditor compiles to the source it stands for.
+    """
+    dirs: set[str] = set()
+    for f in files:
+        parent = PurePosixPath(f).parent
+        while str(parent) not in (".", ""):
+            dirs.add(str(parent))
+            parent = parent.parent
+    aliases = compile_aliases(dirs, dirs)
+
+    def mirrored(rel: str) -> str:
+        folder = str(PurePosixPath(rel).parent)
+        return f"{aliases[folder]}/{PurePosixPath(rel).name}" if folder in aliases else rel
+
+    stand_ins = {mirrored(f): f for f in files if mirrored(f) != f}
+    targets = {mirrored(f): f for f in files if f.lower().endswith(mt5spec.SOURCE_SUFFIX)}
+    return stand_ins, targets
 
 
 def _pack(root: Path, rels: Iterable[str], extra: Mapping[str, str] | None = None) -> bytes:
@@ -2075,14 +2106,7 @@ async def compile_sources(
     files = collect_sources(root)
     sources = [f for f in files if f.lower().endswith(mt5spec.SOURCE_SUFFIX)]
     source_dirs = sorted({str(PurePosixPath(s).parent) for s in sources})
-    aliases = compile_aliases(source_dirs, {str(PurePosixPath(f).parent) for f in files})
-
-    def compiled_as(rel: str) -> str:
-        folder = str(PurePosixPath(rel).parent)
-        return f"{aliases[folder]}/{PurePosixPath(rel).name}" if folder in aliases else rel
-
-    stand_ins = {compiled_as(f): f for f in files if str(PurePosixPath(f).parent) in aliases}
-    targets = {compiled_as(s): s for s in sources}  # what MetaEditor compiles -> source
+    stand_ins, targets = compile_layout(files)  # targets: what MetaEditor compiles
     work = f"{EXPERTS_DIR}/mt5ctl-build-{uuid.uuid4().hex[:12]}"
     out = Path(out_dir)
     try:
@@ -2138,8 +2162,11 @@ async def compile_sources(
             for fields in _lines(fetched.stdout, "TAR"):
                 _unpack_ex5(_unb64(fields[0]), out, ex5)
     finally:
-        await transport.run(
-            host, scripts.build_remove_dir_script(term.data_dir, work), check=False
+        # Not cut short by a cancellation: the build folder sits in MQL5/Experts.
+        await _uncancellable(
+            transport.run(
+                host, scripts.build_remove_dir_script(term.data_dir, work), check=False
+            )
         )
     errors = warnings = 0
     for text in logs.values():
