@@ -22,7 +22,7 @@ from __future__ import annotations
 import hashlib
 import re
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
 from . import mt5spec
@@ -174,6 +174,10 @@ class Bundle:
     files: Mapping[str, str]
     chart_experts: Mapping[str, str]
     algo_trading_off: tuple[str, ...] = ()
+    contents: Mapping[str, bytes] = field(default_factory=dict, repr=False)
+    """The bytes each file had when the bundle was read and checked: what a
+    deploy uploads, so a file changed on disk meanwhile is never sent in its
+    place."""
 
     @property
     def charts(self) -> list[str]:
@@ -230,6 +234,7 @@ def read_bundle(path: str | Path, profile: str | None = None) -> Bundle:
         )
 
     files: dict[str, str] = {}
+    contents: dict[str, bytes] = {}
     chart_experts: dict[str, str] = {}
     algo_off: list[str] = []
     for item in sorted(root.rglob("*")):
@@ -240,6 +245,7 @@ def read_bundle(path: str | Path, profile: str | None = None) -> Bundle:
             continue
         validate_member(rel, chosen)
         data = item.read_bytes()
+        contents[rel] = data
         if is_chart(rel):
             try:
                 chart = ChartFile.parse(data)
@@ -275,4 +281,5 @@ def read_bundle(path: str | Path, profile: str | None = None) -> Bundle:
         files=files,
         chart_experts=chart_experts,
         algo_trading_off=tuple(algo_off),
+        contents=contents,
     )

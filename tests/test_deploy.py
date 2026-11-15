@@ -803,3 +803,24 @@ def test_status_judges_the_connection_by_the_current_session(farm: Farm) -> None
     (logs / "20261115.log").write_bytes(("\r\n".join(lines) + "\r\n").encode("utf-16-le"))
     (st,) = asyncio.run(operations.status(farm.registry))
     assert st.connected is None
+
+
+def test_deploy_uploads_the_bytes_it_checked(
+    farm: Farm, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A build rewriting the bundle while the terminal stops must not slip
+    unchecked bytes in under a manifest that describes the checked ones."""
+    bundle = bundle_v1(tmp_path / "v1")
+    real = operations._stop_and_drain
+
+    async def stop_then_rewrite(host: Host, term: Terminal) -> Any:
+        result = await real(host, term)
+        (bundle / EXPERT).write_bytes(b"unvalidated")
+        (bundle / CHART1).write_bytes(chart_bytes(symbol="USDJPY"))
+        return result
+
+    monkeypatch.setattr(operations, "_stop_and_drain", stop_then_rewrite)
+    farm.journal_on_start("Trend")
+    deploy(farm, bundle)
+    assert (farm.data / EXPERT).read_bytes() == b"trend v1"
+    assert (farm.data / CHART1).read_bytes() == chart_bytes()

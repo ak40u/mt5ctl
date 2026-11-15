@@ -846,7 +846,11 @@ def build_upload(
                 data = extra[rel]
             else:
                 validate_member(rel, bundle.profile)
-                data = (bundle.root / rel).read_bytes()
+                if rel not in bundle.contents:
+                    raise ValueError(f"{rel} is not a file of the bundle")
+                # The bytes that were checked when the bundle was read, not
+                # whatever the file holds now (a build may have rewritten it).
+                data = bundle.contents[rel]
             shas[rel] = hashlib.sha256(data).hexdigest()
             info = tarfile.TarInfo(rel)
             info.size = len(data)
