@@ -640,7 +640,7 @@ def test_stop_live_needs_confirmation(farm: Farm) -> None:
 
 
 def test_journal_errors_are_reported() -> None:
-    st = TerminalStatus("t", "h", Env.DEMO, "active", connected=None)
+    st = TerminalStatus("t", "h", Env.DEMO, "active", connected=True)
     journal = (
         'QR\t2\t11:41:43.557\tTerminal\tcannot load config "cfg\\login.ini" at start\n'
         "HJ\t0\t11:41:45.227\tTerminal\tMetaTrader 5 x64 build 6320 started\n"
@@ -667,3 +667,11 @@ def test_unclean_stop_is_reported(farm: Farm, tmp_path: Path) -> None:
     from mt5ctl.formatting import deploy_lines
 
     assert any("did not close itself" in line for line in deploy_lines(deployed))
+
+
+def test_unknown_connection_is_not_healthy() -> None:
+    """Right after a start, before the login is in the journal."""
+    st = TerminalStatus("t", "h", Env.DEMO, "active", connected=None)
+    journal = "HJ\t0\t11:41:45.227\tTerminal\tMetaTrader 5 x64 build 6320 started\n"
+    report = operations.evaluate_verify(st, journal, set(), require_start=True)
+    assert report.connected is None and not report.healthy

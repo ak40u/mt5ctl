@@ -332,7 +332,7 @@ def evaluate_verify(
     healthy = (
         st.service_state == "active"
         and started is not False
-        and connected is not False
+        and connected is True
         and trading_disabled is None
         and not failed
         and not pending

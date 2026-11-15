@@ -76,8 +76,12 @@ CHARTS_CONTIGUOUS = True
 # Terminal process and journal
 # --------------------------------------------------------------------------- #
 
-# Process name of the terminal under Wine, as /proc/<pid>/comm shows it.
-TERMINAL_PROCESS_NAMES = ("terminal64.exe",)
+# The terminal's executable, as it appears in the process's command line. Its
+# /proc/<pid>/comm is not reliable: under Wine 11 it is the name of the main
+# thread, "main". Observed (build 6320, Wine 11.20): command line
+# "Z:\\...\\terminal\\terminal64.exe /portable ...", comm "main"; broker
+# sockets are owned by that pid (and by wineserver).
+TERMINAL_EXECUTABLES = ("terminal64.exe",)
 
 # Exit codes are not documented. Observed (build 6320, Wine 11): `taskkill
 # /IM terminal64.exe` without /F makes the terminal close itself and save its

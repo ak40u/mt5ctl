@@ -17,6 +17,7 @@ on macOS; the helpers paper over the GNU/BSD differences in ``stat`` and
 from __future__ import annotations
 
 import base64
+import re
 from collections.abc import Iterable, Mapping
 
 from . import mt5spec
@@ -46,6 +47,21 @@ fmtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1"; }
 fdev() { stat -c %d "$1" 2>/dev/null || stat -f %d "$1"; }
 limit() { local t="$1"; shift; if command -v timeout >/dev/null 2>&1; then timeout "$t" "$@"; else "$@"; fi; }
 """
+
+
+def _is_terminal_function() -> str:
+    """``is_terminal <pid>``: whether the process runs the terminal executable.
+
+    Matched on the command line, not on ``comm`` (see
+    :data:`mt5spec.TERMINAL_EXECUTABLES`): the executable name preceded by a
+    path separator or the start of the line, and followed by a space or the end.
+    """
+    names = "|".join(re.escape(n) for n in mt5spec.TERMINAL_EXECUTABLES)
+    pattern = rf"(^|[\\/ ])({names})( |$)"
+    return (
+        "is_terminal() { tr '\\000' ' ' < \"/proc/$1/cmdline\" 2>/dev/null "
+        f"| grep -qiE {sh_quote(pattern)}; }}"
+    )
 
 
 def sh_quote(value: str) -> str:
@@ -99,10 +115,10 @@ def build_drain_script(service: str, scope: ServiceScope, timeout_s: int) -> str
     ``Result`` tells a clean exit (``success``) from one systemd had to force
     (``timeout``, ``signal``, ...).
     """
-    names = "|".join(mt5spec.TERMINAL_PROCESS_NAMES)
     ctl = _systemctl(scope, mutate=False)
     return f"""\
 set +e
+{_is_terminal_function()}
 SVC={sh_quote(service)}
 for _ in $(seq 1 {int(timeout_s)}); do
   st=$({ctl} is-active "$SVC" 2>/dev/null)
@@ -111,7 +127,7 @@ for _ in $(seq 1 {int(timeout_s)}); do
   cg=$({ctl} show -p ControlGroup --value "$SVC" 2>/dev/null)
   if [ "$busy" = 0 ] && [ -n "$cg" ] && [ -r "/sys/fs/cgroup$cg/cgroup.procs" ]; then
     for p in $(cat "/sys/fs/cgroup$cg/cgroup.procs" 2>/dev/null); do
-      case "$(cat /proc/$p/comm 2>/dev/null)" in {names}) busy=1; break ;; esac
+      if is_terminal "$p"; then busy=1; break; fi
     done
   fi
   if [ "$busy" = 0 ]; then
@@ -416,10 +432,10 @@ def build_status_script(
         f"{sh_quote(scope.value)} {sh_quote(data_dir)}"
         for tid, unit, scope, data_dir in specs
     )
-    names = "|".join(mt5spec.TERMINAL_PROCESS_NAMES)
     return f"""\
 set +e
 {HELPERS}
+{_is_terminal_function()}
 NOW=$(date +%s)
 UP=$(awk '{{print $1}}' /proc/uptime 2>/dev/null)
 CURUID=$(id -u)
@@ -451,7 +467,7 @@ emit() {{
   if [ "$HAVE_SS" = 1 ] && [ "$attrib" = 1 ] && [ -n "$cg" ] && [ -r "/sys/fs/cgroup$cg/cgroup.procs" ]; then
     pids=""
     for p in $(cat "/sys/fs/cgroup$cg/cgroup.procs"); do
-      case "$(cat /proc/$p/comm 2>/dev/null)" in {names}) pids="$pids $p" ;; esac
+      if is_terminal "$p"; then pids="$pids $p"; fi
     done
     if [ -n "$pids" ]; then
       estab=0

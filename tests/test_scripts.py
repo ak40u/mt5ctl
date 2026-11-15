@@ -87,3 +87,22 @@ def test_remove_dir_refuses_escapes() -> None:
     for bad in ("", "/etc", "MQL5/../.."):
         with pytest.raises(ValueError):
             scripts.build_remove_dir_script("/data", bad)
+
+
+@pytest.mark.skipif(not Path("/proc/self/cmdline").exists(), reason="needs Linux /proc")
+def test_is_terminal_matches_the_command_line_not_comm() -> None:
+    """Under Wine 11 the terminal's comm is "main"; its command line names the exe."""
+    func = scripts._is_terminal_function()
+    script = f"""
+{func}
+bash -c 'exec -a "Z:\\\\home\\\\t\\\\terminal\\\\terminal64.exe /portable" sleep 5' &
+T=$!
+sleep 5 &
+O=$!
+sleep 0.2
+is_terminal $T && echo "T=yes" || echo "T=no"
+is_terminal $O && echo "O=yes" || echo "O=no"
+kill $T $O
+"""
+    out = run(script).stdout
+    assert "T=yes" in out and "O=no" in out
