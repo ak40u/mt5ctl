@@ -97,6 +97,8 @@ After=network-online.target
 
 [Service]
 User=trader
+# The terminal keeps the saved login in Config/accounts.dat: keep its files private.
+UMask=0077
 Environment=WINEPREFIX=/home/trader/mt5/demo1-prefix
 Environment=WINEDEBUG=-all
 Environment=DISPLAY=:91
@@ -237,7 +239,8 @@ Enabled=1
 ```
 
 Observed (build 6320): with this file the terminal logs in with the saved
-password at every start. Started with `/login:<account>` instead, or with no
+password at every start. The terminal writes that file with the unit's umask,
+so give the unit `UMask=0077` (as in the [unit above](#systemd-unit)). Started with `/login:<account>` instead, or with no
 start file, it opens the login dialog and waits there; `login` then reports
 `NOT connected` after the restart. Run `login` again when the password changes.
 
