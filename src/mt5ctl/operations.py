@@ -14,12 +14,13 @@ import contextlib
 import hashlib
 import io
 import os
+import re
 import socket
 import tarfile
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 
 import anyio
@@ -40,6 +41,7 @@ from .errors import (
     DeployError,
     LoginError,
     RemoteCommandError,
+    UsageError,
 )
 from .manifest import MANIFEST_RELPATH, Manifest
 from .models import Env, Host, HostKind, Registry, Terminal
@@ -49,8 +51,10 @@ from .results import (
     CompileResult,
     DeployResult,
     LoginResult,
+    LogsResult,
     RestartResult,
     StopResult,
+    TerminalInfo,
     TerminalStatus,
     VerifyReport,
 )
@@ -961,6 +965,170 @@ async def adopt(
         foreign=tuple(sorted(c for c in state.charts if c not in bundle.files)),
         manifest_path=f"{term.data_dir}/{MANIFEST_RELPATH}",
     )
+
+
+# --------------------------------------------------------------------------- #
+# Logs and info
+# --------------------------------------------------------------------------- #
+
+LOGS_MAX_BYTES = 4 * 1024 * 1024
+INFO_TAIL_BYTES = 1024 * 1024
+INFO_PREVIOUS_BYTES = 256 * 1024
+LOG_SOURCES = {"journal": (mt5spec.JOURNAL_DIR,), "experts": mt5spec.EXPERTS_LOG_DIRS}
+
+
+def _tails(stdout: str) -> dict[str, tuple[str, int, bytes, bytes]]:
+    """``TAIL`` lines by terminal id: (file name, size, tail, previous file's tail)."""
+    out = {}
+    for fields in _lines(stdout, "TAIL"):
+        tid, name, size, tail, prev = (fields + [""] * 5)[:5]
+        out[tid] = (
+            _unb64(name).decode("utf-8", "replace"),
+            _int_or_none(size) or 0,
+            _unb64(tail),
+            _unb64(prev),
+        )
+    return out
+
+
+async def logs(
+    registry: Registry,
+    terminal_id: str,
+    *,
+    source: str = "journal",
+    pattern: str | None = None,
+    lines: int = 50,
+) -> LogsResult:
+    """The last *lines* of a terminal's newest journal (or experts' log) file.
+
+    With *pattern* (a Python regular expression, case-insensitive), only the
+    matching lines. At most :data:`LOGS_MAX_BYTES` of the file's end is read.
+    """
+    if source not in LOG_SOURCES:
+        raise UsageError(f"source must be one of {sorted(LOG_SOURCES)}, got {source!r}")
+    regex = None
+    if pattern:
+        try:
+            regex = re.compile(pattern, re.IGNORECASE)
+        except re.error as exc:
+            raise UsageError(f"bad pattern {pattern!r}: {exc}") from None
+    term = registry.terminal(terminal_id)
+    host = registry.host_of(term)
+    script = scripts.build_log_tails_script(
+        [(term.id, term.data_dir)], LOG_SOURCES[source], LOGS_MAX_BYTES
+    )
+    result = await transport.run(host, script)
+    name, size, tail, _ = _tails(result.stdout).get(term.id, ("", 0, b"", b""))
+    text = decode_lenient(tail).lstrip("\ufeff")
+    rows = [line for line in text.replace("\r", "").split("\n") if line.strip()]
+    if size > len(tail) and rows:
+        rows = rows[1:]  # the first line read is cut
+    if regex is not None:
+        rows = [line for line in rows if regex.search(line)]
+    keep = max(1, min(lines, 10_000))
+    return LogsResult(
+        terminal=term.id,
+        source=source,
+        file=name or None,
+        lines=tuple(rows[-keep:]),
+        size=size,
+        read_bytes=min(size, len(tail)),
+    )
+
+
+def journal_info(terminal: str, text: str) -> TerminalInfo:
+    """What a journal says about the latest session (pure).
+
+    Build, system line and start file come from the latest start; account,
+    server and access point from the latest authorization; trading state is
+    judged after it.
+    """
+    lines = text.splitlines()
+    starts = [
+        n for n, line in enumerate(lines) if mt5spec.LOG_TERMINAL_STARTED_RE.search(line)
+    ]
+    session_lines = lines[starts[-1] :] if starts else lines
+    session = "\n".join(session_lines)
+    build = system = start_config = start_time = None
+    if starts:
+        first = session_lines[0]
+        if (m := mt5spec.LOG_BUILD_RE.search(first)) is not None:
+            build = int(m.group(1))
+        cols = first.split("\t")
+        start_time = cols[2].strip() if len(cols) > 3 else None
+        for line in session_lines[1:6]:
+            if system is None and (m := mt5spec.LOG_SYSTEM_RE.search(line)) is not None:
+                system = m.group(1).strip()
+            if (
+                start_config is None
+                and (m := mt5spec.LOG_LAUNCHED_WITH_RE.search(line)) is not None
+            ):
+                start_config = m.group(1)
+    account = server = access = company = None
+    ping: float | None = None
+    positions = orders = None
+    for line in session.splitlines():
+        if (m := mt5spec.LOG_AUTHORIZED_DETAIL_RE.search(line)) is not None:
+            account, server = m["account"], m["server"]
+            access = m["access"].strip() if m["access"] else None
+            ping = float(m["ping"]) if m["ping"] else None
+        elif (m := mt5spec.LOG_SYNCHRONIZED_RE.search(line)) is not None:
+            company = m["company"].strip()
+            positions, orders = int(m["positions"]), int(m["orders"])
+    return TerminalInfo(
+        terminal=terminal,
+        build=build,
+        started=start_time,
+        system=system,
+        start_config=start_config,
+        account=account,
+        server=server,
+        access_point=access,
+        ping_ms=ping,
+        company=company,
+        positions=positions,
+        orders=orders,
+        trading_disabled=journal_trading_disabled(session),
+    )
+
+
+async def _info_for_host(host: Host, terms: list[Terminal]) -> list[TerminalInfo]:
+    script = scripts.build_log_tails_script(
+        [(t.id, t.data_dir) for t in terms],
+        (mt5spec.JOURNAL_DIR,),
+        INFO_TAIL_BYTES,
+        INFO_PREVIOUS_BYTES,
+    )
+    try:
+        result = await transport.run(host, script)
+    except RemoteCommandError as exc:
+        return [TerminalInfo(terminal=t.id, error=str(exc)) for t in terms]
+    tails = _tails(result.stdout)
+    out = []
+    for term in terms:
+        name, _size, tail, prev = tails.get(term.id, ("", 0, b"", b""))
+        if not name:
+            out.append(TerminalInfo(terminal=term.id, error="no journal yet"))
+            continue
+        text = decode_lenient(prev).lstrip("\ufeff") + "\n" + decode_lenient(tail)
+        out.append(replace(journal_info(term.id, text.replace("\r", "")), log_file=name))
+    return out
+
+
+async def info(
+    registry: Registry, terminal_ids: list[str] | None = None
+) -> list[TerminalInfo]:
+    """Build, account, server and session facts from the journals, one trip per host."""
+    ids = list(registry.terminals) if terminal_ids is None else terminal_ids
+    terms = [registry.terminal(i) for i in ids]
+    by_host: dict[str, list[Terminal]] = {}
+    for term in terms:
+        by_host.setdefault(term.host, []).append(term)
+    groups = await asyncio.gather(
+        *(_info_for_host(registry.hosts[h], ts) for h, ts in by_host.items())
+    )
+    found = {i.terminal: i for group in groups for i in group}
+    return [found[i] for i in ids]
 
 
 # --------------------------------------------------------------------------- #

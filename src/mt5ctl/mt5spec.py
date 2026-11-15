@@ -101,6 +101,10 @@ BROKER_PORT = 443
 # there, observed), so only dated files are the journal.
 JOURNAL_DIR = "logs"
 JOURNAL_GLOB = "[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9].log"
+# The experts' own log (what Print() writes, the terminal's "Experts" tab): the
+# same dated UTF-16LE files with a BOM, in MQL5/Logs. Observed under Wine
+# (build 6320): the folder is created as "MQL5/logs", so both are looked in.
+EXPERTS_LOG_DIRS = ("MQL5/Logs", "MQL5/logs")
 
 # Journal lines (matched case-insensitively, anywhere in the line).
 # Observed (build 6320, with and without a broker account):
@@ -143,6 +147,27 @@ LOG_AUTH_FAILED_RE = re.compile(
 # a password, logs it in by itself. Started with /login:<account>, or with no
 # config at all, it opens the login dialog instead and waits there.
 START_CONFIG_LOGIN = "[Common]\r\nLogin={account}\r\nServer={server}\r\n"
+# What `info` reads from the journal. Observed (build 6320):
+#   Terminal  MetaTrader 5 x64 build 6320 started for MetaQuotes Ltd.
+#   Terminal  Windows 11 build 22000 on Wine 11.20 Linux 6.6..., 64 x <cpu>, ...
+#   Terminal  launched with <the /config: start file, as a Windows path>
+#   Network   '<login>': authorized on <server> through <access point>
+#   Network   '<login>': terminal synchronized with <company>: 0 positions, 0 orders, ...
+# No ping is written with the authorization (MetaTrader 4 wrote one); the
+# pattern takes one if a build adds it.
+LOG_BUILD_RE = re.compile(r"MetaTrader 5 .*?build (\d+) started", re.IGNORECASE)
+LOG_SYSTEM_RE = re.compile(r"\t(Windows .* on Wine [^,]+)", re.IGNORECASE)
+LOG_LAUNCHED_WITH_RE = re.compile(r"launched with (.+?)\s*$", re.IGNORECASE)
+LOG_AUTHORIZED_DETAIL_RE = re.compile(
+    r"'(?P<account>[^']+)': authorized on (?P<server>\S+)"
+    r"(?: through (?P<access>.+?))?(?: \(ping: (?P<ping>[0-9.]+) ?ms\))?\s*$",
+    re.IGNORECASE,
+)
+LOG_SYNCHRONIZED_RE = re.compile(
+    r"terminal synchronized with (?P<company>.+?): (?P<positions>\d+) positions?, "
+    r"(?P<orders>\d+) orders?",
+    re.IGNORECASE,
+)
 LOG_CONNECTION_LOST_RE = re.compile(
     r"connection to .* lost|no connection|disconnected from", re.IGNORECASE
 )

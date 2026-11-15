@@ -12,6 +12,10 @@ class Mt5ctlError(Exception):
     """Base class for all expected, user-facing errors."""
 
 
+class UsageError(Mt5ctlError):
+    """An argument the tool cannot act on (a bad pattern, an unknown choice)."""
+
+
 class ConfigError(Mt5ctlError):
     """The terminal registry is missing, malformed, or internally inconsistent."""
 

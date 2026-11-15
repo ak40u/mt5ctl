@@ -440,6 +440,47 @@ echo "MANIFEST{SEP}ok"
 _JOURNAL = f"{mt5spec.JOURNAL_DIR}/{mt5spec.JOURNAL_GLOB}"
 
 
+def build_log_tails_script(
+    specs: Iterable[tuple[str, str]],
+    log_dirs: Iterable[str],
+    tail_bytes: int,
+    previous_bytes: int = 0,
+) -> str:
+    """The end of each terminal's newest dated log, several terminals in one trip.
+
+    *log_dirs* are relative to each data folder (the journal, or the experts'
+    log). One line per terminal::
+
+        TAIL|<id>|<b64 newest file name>|<size>|<b64 tail>|<b64 tail of the file before>
+
+    The tails are raw bytes for Python to decode. Byte counts are kept even,
+    so a UTF-16 tail starts on a character.
+    """
+    n = int(tail_bytes) + int(tail_bytes) % 2
+    m = int(previous_bytes) + int(previous_bytes) % 2
+    dirs = " ".join(sh_quote(d) for d in log_dirs)
+    calls = "\n".join(f"tailof {sh_quote(tid)} {sh_quote(d)}" for tid, d in specs)
+    return f"""\
+set +e
+{HELPERS}
+tailof() {{
+  log=""; prev=""
+  for sub in {dirs}; do
+    for f in "$2/$sub"/{mt5spec.JOURNAL_GLOB}; do
+      [ -f "$f" ] || continue
+      if [ -z "$log" ] || [ "${{f##*/}}" \\> "${{log##*/}}" ]; then prev=$log; log=$f
+      elif [ -z "$prev" ] || [ "${{f##*/}}" \\> "${{prev##*/}}" ]; then prev=$f; fi
+    done
+  done
+  if [ -z "$log" ]; then echo "TAIL{SEP}$1{SEP}{SEP}0{SEP}{SEP}"; return; fi
+  p=""
+  if [ {m} -gt 0 ] && [ -n "$prev" ]; then p=$(tail -c {m} "$prev" | base64 | tr -d '\\n'); fi
+  echo "TAIL{SEP}$1{SEP}$(b64s "${{log##*/}}"){SEP}$(fsize "$log"){SEP}$(tail -c {n} "$log" | base64 | tr -d '\\n'){SEP}$p"
+}}
+{calls}
+"""
+
+
 def build_log_cursor_script(data_dir: str) -> str:
     """Remember where the journal ends now: ``CURSOR|<b64 file name>|<size>``.
 

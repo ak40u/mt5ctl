@@ -25,6 +25,8 @@ TOOLS = {
     "mt5_stop": False,
     "mt5_compile": False,
     "mt5_login": False,
+    "mt5_info": True,
+    "mt5_logs": True,
 }
 
 

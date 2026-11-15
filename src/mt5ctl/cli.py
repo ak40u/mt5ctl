@@ -248,6 +248,28 @@ def _cmd_compile(args: argparse.Namespace) -> int:
     return EXIT_OK if result.ok else EXIT_ERROR
 
 
+def _cmd_logs(args: argparse.Namespace) -> int:
+    registry = load_registry(args.config)
+    result = asyncio.run(
+        operations.logs(
+            registry,
+            args.terminal,
+            source="experts" if args.experts else "journal",
+            pattern=args.grep,
+            lines=args.lines,
+        )
+    )
+    _output(args, asdict(result), fmt.logs_lines(result))
+    return EXIT_OK
+
+
+def _cmd_info(args: argparse.Namespace) -> int:
+    registry = load_registry(args.config)
+    rows = asyncio.run(operations.info(registry, args.terminals or None))
+    _output(args, [asdict(r) for r in rows], fmt.info_lines(rows))
+    return EXIT_ERROR if any(r.error for r in rows) else EXIT_OK
+
+
 def _cmd_login(args: argparse.Namespace) -> int:
     password = None
     if args.password_stdin:
@@ -382,6 +404,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     status.add_argument("terminals", nargs="*", metavar="terminal", help="default: all")
     status.set_defaults(func=_cmd_status)
+
+    info = with_config(
+        with_json(
+            sub.add_parser("info", help="build, account, server and session from the journal")
+        )
+    )
+    info.add_argument("terminals", nargs="*", metavar="terminal", help="default: all")
+    info.set_defaults(func=_cmd_info)
+
+    logs = terminal_command("logs", "the end of the newest journal (or experts' log)")
+    logs.add_argument(
+        "-n", "--lines", type=int, default=50, help="how many lines (default 50)"
+    )
+    logs.add_argument("--grep", metavar="REGEX", help="only lines matching (case-insensitive)")
+    logs.add_argument(
+        "--experts", action="store_true", help="the experts' log (Print output) instead"
+    )
+    logs.set_defaults(func=_cmd_logs)
 
     restart = with_verify(with_live(terminal_command("restart", "restart through systemd")))
     restart.set_defaults(func=_cmd_restart)

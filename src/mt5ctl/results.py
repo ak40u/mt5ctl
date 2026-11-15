@@ -146,6 +146,48 @@ class RestartResult:
 
 
 @dataclass(frozen=True, slots=True)
+class TerminalInfo:
+    """What the journal tells about a terminal's latest session."""
+
+    terminal: str
+    build: int | None = None
+    started: str | None = None
+    """Time of the latest start line (journal time, ``HH:MM:SS.mmm``)."""
+    system: str | None = None
+    """The OS / Wine line the terminal logs at start."""
+    start_config: str | None = None
+    """The ``/config:`` start file it was launched with, as it logged it."""
+    account: str | None = None
+    server: str | None = None
+    access_point: str | None = None
+    ping_ms: float | None = None
+    company: str | None = None
+    """The broker company named on synchronization."""
+    positions: int | None = None
+    orders: int | None = None
+    trading_disabled: str | None = None
+    log_file: str | None = None
+    error: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class LogsResult:
+    terminal: str
+    source: str
+    """``journal`` or ``experts``."""
+    file: str | None
+    lines: tuple[str, ...]
+    size: int = 0
+    """Size of the file read, in bytes."""
+    read_bytes: int = 0
+    """How much of its end was read (the whole file when equal to ``size``)."""
+
+    @property
+    def partial(self) -> bool:
+        return self.read_bytes < self.size
+
+
+@dataclass(frozen=True, slots=True)
 class LoginResult:
     terminal: str
     account: str

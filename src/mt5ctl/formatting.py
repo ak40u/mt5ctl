@@ -11,8 +11,10 @@ from .results import (
     CompileResult,
     DeployResult,
     LoginResult,
+    LogsResult,
     RestartResult,
     StopResult,
+    TerminalInfo,
     TerminalStatus,
     VerifyReport,
 )
@@ -183,6 +185,62 @@ def stop_lines(result: StopResult) -> list[str]:
         f"(systemd Result={result.unit_result})",
         f"warning: {UNCLEAN_STOP}",
     ]
+
+
+def journal_line(raw: str) -> str:
+    """A journal line for reading: time, source and message, errors marked."""
+    cols = raw.split("\t")
+    if len(cols) < 5:
+        return raw
+    mark = {"1": "WARN ", "2": "ERROR "}.get(cols[1].strip(), "")
+    return f"{cols[2]}  {cols[3]}  {mark}{chr(9).join(cols[4:])}".replace("\t", " ")
+
+
+def logs_lines(result: LogsResult) -> list[str]:
+    if result.file is None:
+        return [f"{result.terminal}: no {result.source} log yet"]
+    head = f"# {result.terminal} {result.source} {result.file}"
+    if result.partial:
+        head += f" (last {mib(result.read_bytes)} of {mib(result.size)})"
+    return [head, *(journal_line(line) for line in result.lines)]
+
+
+def mib(n: int) -> str:
+    return f"{n / 1048576:.1f} MB"
+
+
+def info_lines(rows: list[TerminalInfo]) -> list[str]:
+    out: list[str] = []
+    for i in rows:
+        if i.error:
+            out.append(f"{i.terminal}: {i.error}")
+            continue
+        build = f"build {i.build}" if i.build else "build unknown"
+        started = f", started {i.started}" if i.started else ""
+        out.append(f"{i.terminal}: {build}{started}  ({i.log_file})")
+        if i.account:
+            where = f"account {i.account} on {i.server}"
+            if i.access_point:
+                where += f" through {i.access_point}"
+            if i.ping_ms is not None:
+                where += f", ping {i.ping_ms:g} ms"
+            if i.company:
+                where += f" ({i.company})"
+            out.append("  " + where)
+        else:
+            out.append("  not logged in this session")
+        facts = []
+        if i.positions is not None:
+            facts.append(f"{i.positions} positions, {i.orders} orders")
+        if i.trading_disabled:
+            facts.append(f"TRADING DISABLED ({i.trading_disabled})")
+        if facts:
+            out.append("  " + "; ".join(facts))
+        if i.start_config:
+            out.append(f"  start file {i.start_config}")
+        if i.system:
+            out.append(f"  {i.system}")
+    return out
 
 
 def login_lines(result: LoginResult) -> list[str]:

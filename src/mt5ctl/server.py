@@ -87,6 +87,30 @@ def build_server(config: str | None = None) -> MCPServer:
 
     @mcp.tool(annotations=READ_ONLY)
     @_guard
+    async def mt5_info(terminal: str = "all") -> str:
+        """Build, account, server, access point, broker company, open positions and
+        orders, and the start file of one or all terminals, from their journals."""
+        ids = None if terminal == "all" else [terminal]
+        return "\n".join(fmt.info_lines(await operations.info(tools.registry, ids)))
+
+    @mcp.tool(annotations=READ_ONLY)
+    @_guard
+    async def mt5_logs(
+        terminal: str, lines: int = 50, grep: str | None = None, experts: bool = False
+    ) -> str:
+        """The end of a terminal's newest journal, or with experts=true its experts'
+        log (what Print() writes). grep: a case-insensitive regular expression."""
+        result = await operations.logs(
+            tools.registry,
+            terminal,
+            source="experts" if experts else "journal",
+            pattern=grep,
+            lines=lines,
+        )
+        return "\n".join(fmt.logs_lines(result))
+
+    @mcp.tool(annotations=READ_ONLY)
+    @_guard
     async def mt5_plan(terminal: str, bundle: str) -> str:
         """Show what deploying a local bundle folder would add, update and remove.
 
