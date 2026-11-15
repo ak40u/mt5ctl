@@ -908,3 +908,18 @@ def test_adopt_never_silently_unmanages_files(farm: Farm, tmp_path: Path) -> Non
     assert BREAKOUT in manifest(farm)
     asyncio.run(operations.adopt(farm.registry, "demo1", small, replace=True))
     assert BREAKOUT not in manifest(farm)
+
+
+def test_ssh_user_other_than_the_units_is_refused(farm: Farm, tmp_path: Path) -> None:
+    """Files written as another user could not be saved over by the terminal."""
+    (farm.systemd / "mt5-demo1.service.user").write_text("someone-else\n")
+    with pytest.raises(DeployError, match="runs as someone-else"):
+        deploy(farm, bundle_v1(tmp_path / "v1"))
+    assert farm.calls == []
+
+
+def test_root_hands_new_folders_to_the_units_user() -> None:
+    block = operations.scripts._chown_block("trader", ["MQL5/Experts/New/Sub/EA.ex5"])
+    for folder in ("MQL5/Experts", "MQL5/Experts/New", "MQL5/Experts/New/Sub"):
+        assert f"'{folder}'" in block
+    assert "'MQL5'" not in block.split("for d in", 1)[1]

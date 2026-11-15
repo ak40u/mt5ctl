@@ -19,6 +19,7 @@ from __future__ import annotations
 import base64
 import re
 from collections.abc import Iterable, Mapping
+from pathlib import PurePosixPath
 
 from . import mt5spec
 from .bundle import CHARTS_ROOT, EXPERTS_DIR, charts_dir
@@ -363,7 +364,13 @@ for sub in {sh_quote(charts_dir(profile))} {sh_quote(CHARTS_ROOT)} {sh_quote(EXP
 done
 echo "PRE{SEP}filesystem{SEP}ok"
 {user_probe}
-echo "USER{SEP}${{u:-$(id -un)}}"
+u=${{u:-$(id -un)}}
+echo "USER{SEP}$u"
+# Not root and not the unit's user: the files would be the SSH user's, and the
+# terminal could not save its charts over them.
+if [ "$(id -u)" != 0 ] && [ "$u" != "$(id -un)" ]; then
+  echo "PRE{SEP}owner{SEP}the terminal runs as $u but this SSH user is $(id -un): connect as $u (or as root)"
+fi
 """
 
 
@@ -409,11 +416,25 @@ def _chown_block(user: str, targets: Iterable[str]) -> str:
     Only meaningful when the deploy runs as root for a unit with another
     ``User=``; otherwise the files already belong to the right user.
     """
+    targets = list(targets)
+    # Folders a deploy created (mkdir -p for a new Experts subfolder) belong to
+    # root too: the terminal could not save into them. Each parent below MQL5/
+    # is handed over as well, without recursing into what is not ours.
+    parents = sorted(
+        {
+            str(parent)
+            for t in targets
+            for parent in PurePosixPath(t).parents
+            if len(parent.parts) > 1 and parent.parts[0] == "MQL5"
+        }
+    )
     quoted = " ".join(sh_quote(t) for t in targets)
+    folders = " ".join(sh_quote(d) for d in parents)
     return f"""\
 U={sh_quote(user)}
 if [ "$(id -u)" = 0 ] && [ "$U" != root ]; then
   for t in {quoted}; do [ -e "$DIR/$t" ] && chown -R "$U" "$DIR/$t"; done
+  for d in {folders}; do [ -d "$DIR/$d" ] && chown "$U" "$DIR/$d"; done
 fi
 """
 
