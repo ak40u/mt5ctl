@@ -142,3 +142,30 @@ def test_start_after_a_deploy_survives_a_dropped_connection(
     result = asyncio.run(operations.deploy(farm.registry, "demo1", v1, verify_timeout=0))
     assert result.restarted
     assert (farm.systemd / "mt5-demo1.service.state").read_text().strip() == "active"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
+def test_mcp_server_ended_by_a_signal_finishes_what_must_not_be_cut(tmp_path: Path) -> None:
+    """A client ending the server mid-deploy (SIGTERM) must not skip the start."""
+    from mt5ctl import server as srv
+
+    done = tmp_path / "started-again"
+
+    class Busy:
+        async def run_stdio_async(self) -> None:
+            async def critical() -> None:
+                await asyncio.sleep(0.5)
+                done.write_text("yes")
+
+            await operations._uncancellable(critical())
+            await asyncio.sleep(10)  # serving on
+
+    def terminate() -> None:
+        time.sleep(0.2)
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    threading.Thread(target=terminate, daemon=True).start()
+    import anyio
+
+    anyio.run(srv._serve_until_signalled, Busy())
+    assert done.read_text() == "yes"

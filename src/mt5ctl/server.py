@@ -9,9 +9,12 @@ mt5ctl's actionable message, never as a stack trace.
 from __future__ import annotations
 
 import functools
+import signal
+import sys
 from collections.abc import Awaitable, Callable
 from typing import ParamSpec, TypeVar
 
+import anyio
 from mcp.server import MCPServer
 from mcp.server.mcpserver import Image
 from mcp.server.mcpserver.exceptions import ToolError
@@ -20,7 +23,7 @@ from mcp.types import ToolAnnotations
 from . import formatting as fmt
 from . import operations
 from .chart import ChartFile
-from .config import load_registry
+from .config import load_registry, resolve_path
 from .errors import Mt5ctlError
 from .models import Registry
 
@@ -42,14 +45,21 @@ R = TypeVar("R")
 
 
 class Tools:
-    """Holds the registry path; the registry is loaded on first use."""
+    """Holds the registry path; the registry is loaded on use, and again
+    whenever the file changes, so a terminal marked ``env: live`` while the
+    server runs is treated as live from the next call on."""
 
     def __init__(self, config: str | None) -> None:
         self._config = config
+        self._cached: tuple[tuple[str, int], Registry] | None = None
 
-    @functools.cached_property
+    @property
     def registry(self) -> Registry:
-        return load_registry(self._config)
+        path = resolve_path(self._config)
+        key = (str(path), path.stat().st_mtime_ns)
+        if self._cached is None or self._cached[0] != key:
+            self._cached = (key, load_registry(path))
+        return self._cached[1]
 
 
 def _guard(fn: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
@@ -311,5 +321,35 @@ def build_server(config: str | None = None) -> MCPServer:
     return mcp
 
 
+SHUTDOWN_SIGNALS = tuple(
+    getattr(signal, name) for name in ("SIGTERM", "SIGHUP", "SIGINT") if hasattr(signal, name)
+)
+
+
+async def _serve_until_signalled(server: MCPServer) -> None:
+    """Serve on stdio; on SIGTERM, SIGHUP or Ctrl-C, stop the way a cancelled call
+    stops. A client that ends the server mid-deploy would otherwise kill it
+    before the terminal is started again; this way the steps that must not be
+    cut short (the apply, the start, releasing the lock) finish first."""
+    async with anyio.create_task_group() as tg:
+
+        async def watch() -> None:
+            with anyio.open_signal_receiver(*SHUTDOWN_SIGNALS) as signals:
+                async for _ in signals:
+                    tg.cancel_scope.cancel()
+                    return
+
+        async def run() -> None:
+            await server.run_stdio_async()
+            tg.cancel_scope.cancel()
+
+        tg.start_soon(watch)
+        tg.start_soon(run)
+
+
 def serve(config: str | None = None) -> None:
-    build_server(config).run()
+    server = build_server(config)
+    if not SHUTDOWN_SIGNALS or sys.platform == "win32":
+        server.run()
+        return
+    anyio.run(_serve_until_signalled, server)

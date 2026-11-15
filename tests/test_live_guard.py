@@ -108,3 +108,22 @@ def test_every_changing_tool_says_so() -> None:
     for name in CHANGING_TOOLS:
         assert "env=live is refused unless confirm=true" in (tools[name].description or "")
         assert "confirm" in tools[name].input_schema["properties"]
+
+
+def test_server_sees_a_terminal_marked_live_later(farm: Farm, tmp_path: Path) -> None:
+    """The registry is read again when it changes: no stale demo for a live terminal."""
+    import os
+
+    config = tmp_path / "t.yaml"
+    body = (
+        "hosts:\n  here: {kind: local}\n"
+        f"terminals:\n  t1:\n    host: here\n    data_dir: '{farm.data}'\n"
+        f"    service: {UNIT}\n    service_scope: user\n"
+    )
+    config.write_text(body + "    env: demo\n")
+    server = build_server(str(config))
+    asyncio.run(server.call_tool("mt5_stop", {"terminal": "t1"}))
+    config.write_text(body + "    env: live\n")
+    os.utime(config, ns=(1, 2_000_000_000_000_000_000))
+    with pytest.raises(ToolError, match="confirm=true"):
+        asyncio.run(server.call_tool("mt5_stop", {"terminal": "t1"}))
