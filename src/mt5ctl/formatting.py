@@ -131,9 +131,12 @@ def status_lines(rows: list[TerminalStatus]) -> list[str]:
         if st.error:
             out.append(f"{st.terminal:<14} ERROR {st.error}")
             continue
-        uptime = (
-            f"up {duration(st.active_seconds)}" if st.active_seconds is not None else "up ?"
-        )
+        if st.service_state != "active":
+            uptime = "-"
+        elif st.active_seconds is None:
+            uptime = "up ?"
+        else:
+            uptime = f"up {duration(st.active_seconds)}"
         age = (
             f"journal {duration(st.journal_age_seconds)} ago"
             if st.journal_age_seconds is not None

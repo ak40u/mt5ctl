@@ -235,3 +235,14 @@ def test_status_line_flags_trading_disabled() -> None:
     )
     assert not st.healthy
     assert status_lines([st])[0].endswith("TRADING DISABLED (investor mode)")
+
+
+def test_status_shows_uptime_only_for_an_active_unit() -> None:
+    from mt5ctl.formatting import status_lines
+    from mt5ctl.models import Env
+    from mt5ctl.results import TerminalStatus
+
+    failed = TerminalStatus("t", "h", Env.DEMO, "failed", active_seconds=180)
+    active = TerminalStatus("t", "h", Env.DEMO, "active", active_seconds=180)
+    assert "up 3m" not in status_lines([failed])[0]
+    assert "up 3m" in status_lines([active])[0]
