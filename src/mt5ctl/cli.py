@@ -20,7 +20,7 @@ from . import __version__, operations
 from . import formatting as fmt
 from .bundle import Bundle, read_bundle
 from .chart import ChartFile
-from .config import load_registry
+from .config import load_registry, write_starter
 from .errors import Mt5ctlError
 
 EXIT_OK = 0
@@ -248,6 +248,12 @@ def _cmd_compile(args: argparse.Namespace) -> int:
     return EXIT_OK if result.ok else EXIT_ERROR
 
 
+def _cmd_init(args: argparse.Namespace) -> int:
+    target = write_starter(args.path)
+    print(f"wrote {target}\nedit it, then check it with: mt5ctl doctor")
+    return EXIT_OK
+
+
 def _cmd_doctor(args: argparse.Namespace) -> int:
     registry = load_registry(args.config)
     checks = asyncio.run(operations.doctor(registry))
@@ -411,6 +417,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     status.add_argument("terminals", nargs="*", metavar="terminal", help="default: all")
     status.set_defaults(func=_cmd_status)
+
+    init = sub.add_parser("init", help="write a starter registry (terminals.yaml)")
+    init.add_argument(
+        "path", nargs="?", help="where (default: ~/.config/mt5ctl/terminals.yaml)"
+    )
+    init.set_defaults(func=_cmd_init)
 
     doctor = with_config(
         with_json(sub.add_parser("doctor", help="check hosts, units, folders and connections"))

@@ -92,7 +92,8 @@ You need a MetaTrader 5 terminal installed in portable mode under Wine, run by a
 systemd unit, on a host you can reach with key-based SSH. An example unit file,
 including a clean-shutdown `ExecStop`, is in [docs/deploy.md](docs/deploy.md#systemd-unit).
 
-**1. Register the terminal** in `~/.config/mt5ctl/terminals.yaml`:
+**1. Register the terminal** in `~/.config/mt5ctl/terminals.yaml`
+(`mt5ctl init` writes a starter one, readable only by you):
 
 ```yaml
 hosts:
@@ -108,7 +109,8 @@ terminals:
     env: demo
 ```
 
-**2. Check that mt5ctl can see it:**
+**2. Check that mt5ctl can see it:** `mt5ctl doctor` checks the host, the unit
+and its sudo rule, the data folder and the broker connection; then
 
 ```console
 $ mt5ctl status demo1
@@ -230,6 +232,7 @@ midway, the terminal is still started again and the lock released.
 | `plan <terminal> <bundle>` | what a deploy would change | no |
 | `status [terminal…]` | service state, terminal process, broker connection, journal age | no |
 | `verify <terminal>` | service, connection, every chart's expert loaded | no |
+| `init [path]` | write a starter registry (mode 600; never overwrites) | no |
 | `doctor` | check every host and terminal: tools, unit and sudo rule, data folder, Wine, journal, broker connection | no |
 | `info [terminal…]` | build, account, server, access point, broker, open positions and orders, start file: from the journal's latest session | no |
 | `logs <terminal> [-n N] [--grep RE] [--experts]` | the end of the newest journal, or of the experts' log (`Print` output) | no |

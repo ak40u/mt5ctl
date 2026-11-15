@@ -32,6 +32,48 @@ _UNIT_RE = re.compile(r"[A-Za-z0-9@._:-]+")
 _DISPLAY_RE = re.compile(r":[0-9]+(\.[0-9]+)?")
 
 
+STARTER_REGISTRY = """\
+# mt5ctl terminal registry, written by `mt5ctl init`.
+# Keep this file private: it names your hosts and data folders.
+# Every setting: https://github.com/ak40u/mt5ctl/blob/main/examples/terminals.example.yaml
+
+hosts:
+  # A Linux server reached over SSH (an alias from ~/.ssh/config, or user@host).
+  # Key-based login is required: mt5ctl runs ssh with BatchMode=yes.
+  vps:
+    kind: ssh
+    ssh: trader@vps.example.com
+
+terminals:
+  demo1:
+    host: vps
+    # The folder that contains MQL5/ (for a /portable terminal, the install folder).
+    data_dir: /home/trader/mt5/demo1
+    service: mt5-demo1.service   # its systemd unit; see docs/deploy.md
+    service_scope: system        # system: sudo -n systemctl; user: systemctl --user
+    env: demo                    # live: every changing command needs --confirm
+    # account: '12345678'        # login number, the default for `mt5ctl login`
+    # wine: /opt/wine-staging/bin/wine        # the Wine build that runs it
+    # wineprefix: /home/trader/mt5/demo1-prefix
+"""
+
+
+def write_starter(path: str | os.PathLike[str] | None = None) -> Path:
+    """Write :data:`STARTER_REGISTRY` (mode 600) where the registry is looked up first.
+
+    Refuses to overwrite: :class:`ConfigError` when the file exists.
+    """
+    target = Path(path).expanduser() if path else candidate_paths()[0]
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        fd = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError:
+        raise ConfigError(f"{target} already exists; not overwriting it") from None
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(STARTER_REGISTRY)
+    return target
+
+
 def candidate_paths() -> list[Path]:
     xdg = os.environ.get("XDG_CONFIG_HOME")
     base = Path(xdg).expanduser() if xdg else Path.home() / ".config"
