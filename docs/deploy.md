@@ -126,10 +126,13 @@ Wine 11:
 
 1. **Ask it to close.** Wine's `taskkill` without `/F` sends the close request;
    the terminal saves and exits within seconds, journal line `exit with code 0`.
-2. **Wait for it.** systemd sends SIGTERM to every process left in the unit as
-   soon as `ExecStop` returns. `taskkill` returns at once, so the terminal is
-   killed halfway through closing. `ExecStop` has to wait until the main process
-   is gone.
+2. **Wait for it, then end Wine.** systemd sends SIGTERM to every process left
+   in the unit as soon as `ExecStop` returns. `taskkill` returns at once, so the
+   terminal is killed halfway through closing; `ExecStop` has to wait until the
+   main process is gone. The Wine helpers (`wineserver`, `services.exe`, ...)
+   stay behind and ignore SIGTERM, so it then ends them with `wineserver -k`.
+   With both, a stop takes about 10 s; without, the unit hangs until
+   `TimeoutStopSec`.
 3. **On its own display.** `ExecStop` needs the terminal's `DISPLAY` and
    `XAUTHORITY`. Without them `taskkill` reports that it sent the request, but
    the terminal does not close. Hence the fixed authority file passed to
@@ -147,6 +150,10 @@ while [ -n "$MAINPID" ] && kill -0 "$MAINPID" 2>/dev/null && [ "$i" -lt 50 ]; do
   sleep 1
   i=$((i + 1))
 done
+# The terminal is gone; end the Wine helpers left in the prefix. They ignore
+# SIGTERM and would hold the unit until TimeoutStopSec.
+/usr/bin/wineserver -k 2>/dev/null
+/usr/bin/wineserver -w 2>/dev/null
 exit 0
 ```
 
