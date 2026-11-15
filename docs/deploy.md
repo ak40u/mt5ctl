@@ -40,8 +40,10 @@ lock ─ plan ─┬─ nothing to change ─ verify (no restart) ─ unlock
    `order.wnd` is brought in step (see [chart-format.md](chart-format.md#the-order-file)),
    and the manifest is written last.
 9. **Start and verify.** `systemctl start`, then poll until the service is
-   active, the journal shows the broker authorization and every expert of the
-   bundle logged `loaded successfully`, with no "trading has been disabled"
+   active, the journal shows the broker authorization and the expert of every
+   chart of the bundle logged `loaded successfully` for that chart's symbol and
+   timeframe (an expert on three charts must load three times; a later
+   `removed` line undoes a load), with no "trading has been disabled"
    (investor password) after the login — or until `--verify-timeout`
    (default 180 s). Verify reads only journal lines written after the start; the
    lines it looks for are defined in [`mt5spec.py`](../src/mt5ctl/mt5spec.py).

@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from collections import Counter
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
@@ -341,7 +342,7 @@ def test_unhealthy_start_is_reported_not_rolled_back(farm: Farm, tmp_path: Path)
     farm.journal_on_start(authorized=False)  # no expert loads
     result = deploy(farm, bundle_v1(tmp_path / "v1"), verify_timeout=0.3)
     assert result.verify is not None and not result.verify.healthy
-    assert result.verify.pending == ("Trend",)
+    assert result.verify.pending == ("Trend (EURUSD,H4)",)
     assert (farm.data / EXPERT).exists()
 
 
@@ -423,7 +424,7 @@ def test_restart_waits_for_health(farm: Farm, tmp_path: Path) -> None:
     deploy(farm, bundle_v1(tmp_path / "v1"))
     result = asyncio.run(operations.restart(farm.registry, "demo1", verify_timeout=2.0))
     assert result.verify.healthy
-    assert result.verify.loaded == ("Trend",)
+    assert result.verify.loaded == ("Trend (EURUSD,H4)",)
     assert farm.calls[-1] == "restart mt5-demo1.service"
 
 
@@ -462,7 +463,7 @@ def test_verify_without_restart(farm: Farm, tmp_path: Path) -> None:
     farm.journal_on_start("Trend")
     deploy(farm, bundle_v1(tmp_path / "v1"))
     report = asyncio.run(operations.verify(farm.registry, "demo1"))
-    assert report.healthy and report.loaded == ("Trend",)
+    assert report.healthy and report.loaded == ("Trend (EURUSD,H4)",)
 
 
 def test_evaluate_verify_flags_failed_experts() -> None:
@@ -474,12 +475,46 @@ def test_evaluate_verify_flags_failed_experts() -> None:
         "initializing of Breakout (GBPUSD,H1) failed with code 1\n"
         "expert Breakout (GBPUSD,H1) removed\n"
     )
-    report = operations.evaluate_verify(st, journal, {"Trend", "Breakout", "Missing"})
-    assert report.loaded == ("Trend",)
-    assert report.failed == ("Breakout",)
-    assert report.pending == ("Missing",)
+    expected = Counter(
+        {
+            ("Trend", "EURUSD", "H4"): 1,
+            ("Breakout", "GBPUSD", "H1"): 1,
+            ("Missing", "X", "H1"): 1,
+        }
+    )
+    report = operations.evaluate_verify(st, journal, expected)
+    assert report.loaded == ("Trend (EURUSD,H4)",)
+    assert report.failed == ("Breakout (GBPUSD,H1)",)
+    assert report.pending == ("Missing (X,H1)",)
     assert report.connected is True and not report.healthy
-    assert "failed: Breakout" in report.detail
+    assert "failed: Breakout (GBPUSD,H1)" in report.detail
+
+
+def test_verify_counts_charts_not_expert_names() -> None:
+    """One expert on three charts needs three loads; a removal undoes a load."""
+    st = TerminalStatus("t", "h", Env.DEMO, "active", connected=True)
+    expected = Counter(
+        {
+            ("Trend", "EURUSD", "H4"): 2,
+            ("Trend", "GBPUSD", "H1"): 1,
+            ("Other", "EURUSD", "H4"): 1,
+        }
+    )
+    journal = (
+        "expert Trend (EURUSD,H4) loaded successfully\n"
+        "expert Other (EURUSD,H4) loaded successfully\n"
+        "expert Other (EURUSD,H4) removed\n"
+    )
+    report = operations.evaluate_verify(st, journal, expected)
+    assert report.loaded == ("Trend (EURUSD,H4)",)
+    assert report.pending == ("Other (EURUSD,H4)", "Trend (EURUSD,H4)", "Trend (GBPUSD,H1)")
+    assert not report.healthy and "1/4 experts loaded" in report.detail
+    journal += (
+        "expert Trend (EURUSD,H4) loaded successfully\n"
+        "expert Trend (GBPUSD,H1) loaded successfully\n"
+        "expert Other (EURUSD,H4) loaded successfully\n"
+    )
+    assert operations.evaluate_verify(st, journal, expected).healthy
 
 
 def test_journal_connection_takes_the_latest_event() -> None:
@@ -717,7 +752,7 @@ def test_journal_errors_are_reported() -> None:
         'QR\t2\t11:41:43.557\tTerminal\tcannot load config "cfg\\login.ini" at start\n'
         "HJ\t0\t11:41:45.227\tTerminal\tMetaTrader 5 x64 build 6320 started\n"
     )
-    report = operations.evaluate_verify(st, journal, set(), require_start=True)
+    report = operations.evaluate_verify(st, journal, Counter(), require_start=True)
     assert report.started is True and report.healthy
     assert report.errors == ('Terminal\tcannot load config "cfg\\login.ini" at start',)
     assert "1 error(s) in the journal" in report.detail
@@ -824,3 +859,20 @@ def test_deploy_uploads_the_bytes_it_checked(
     deploy(farm, bundle)
     assert (farm.data / EXPERT).read_bytes() == b"trend v1"
     assert (farm.data / CHART1).read_bytes() == chart_bytes()
+
+
+def test_deploy_verify_needs_every_chart_of_an_expert(farm: Farm, tmp_path: Path) -> None:
+    """Trend runs on two charts; the journal shows it loaded on one."""
+    bundle = write_tree(
+        tmp_path / "two",
+        charts={
+            "chart01.chr": chart_bytes(),
+            "chart02.chr": chart_bytes(symbol="GBPUSD", period=(1, 1)),
+        },
+        experts={EXPERT: b"trend"},
+    )
+    farm.journal_on_start("Trend")  # logs Trend (EURUSD,H4) only
+    result = deploy(farm, bundle, verify_timeout=0.3)
+    assert result.verify is not None and not result.verify.healthy
+    assert result.verify.loaded == ("Trend (EURUSD,H4)",)
+    assert result.verify.pending == ("Trend (GBPUSD,H1)",)

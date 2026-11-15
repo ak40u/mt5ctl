@@ -19,6 +19,7 @@ import socket
 import tarfile
 import time
 import uuid
+from collections import Counter
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
@@ -346,9 +347,61 @@ async def _journal_since(host: Host, term: Terminal, cursor: JournalCursor) -> s
     )
 
 
-def expected_experts(experts: Iterable[str]) -> set[str]:
-    """The names experts are logged under, for a set of expert relpaths."""
-    return {mt5spec.expert_log_name(rel) for rel in experts}
+Instance = tuple[str, str, str]
+"""An expert on one chart, as the journal names it: (expert, symbol, timeframe)."""
+
+
+def chart_instances(charts: Iterable[ChartFile | None]) -> Counter[Instance]:
+    """The expert instances *charts* should run, with how many of each.
+
+    The journal logs ``expert <name> (<symbol>,<period>) loaded successfully``
+    once per chart, so two charts running one expert are two instances; two
+    with the same symbol and timeframe are the same key, counted twice.
+    """
+    found: Counter[Instance] = Counter()
+    for chart in charts:
+        expert = chart.expert if chart is not None else None
+        if expert is None or not expert.path.strip():
+            continue
+        name = mt5spec.expert_log_name(expert.path.replace("\\", "/"))
+        tf = chart.timeframe.name if chart is not None and chart.timeframe else ""
+        found[(name, (chart.symbol if chart else "") or "", tf)] += 1
+    return found
+
+
+def instance_label(instance: Instance) -> str:
+    name, symbol, tf = instance
+    return f"{name} ({symbol},{tf})"
+
+
+def _key(name: str, symbol: str, period: str) -> Instance:
+    return (name.strip().lower(), symbol.strip().lower(), period.strip().upper())
+
+
+def journal_instances(journal: str) -> tuple[Counter[Instance], Counter[Instance]]:
+    """(loaded, failed) instance counts in *journal*, events taken in order.
+
+    A ``removed`` line takes a loaded instance away (the expert was stopped,
+    or removed after its initialisation failed); a failure counts as failed.
+    """
+    events = []
+    for kind, regex in (
+        ("loaded", mt5spec.LOG_EXPERT_LOADED_RE),
+        ("failed", mt5spec.LOG_EXPERT_FAILED_RE),
+        ("removed", mt5spec.LOG_EXPERT_REMOVED_RE),
+    ):
+        events += [(m.start(), kind, m) for m in regex.finditer(journal)]
+    loaded: Counter[Instance] = Counter()
+    failed: Counter[Instance] = Counter()
+    for _pos, kind, m in sorted(events, key=lambda e: e[0]):
+        key = _key(m["name"], m["symbol"], m["period"])
+        if kind == "loaded":
+            loaded[key] += 1
+        elif kind == "failed":
+            failed[key] += 1
+        elif loaded[key] > 0:
+            loaded[key] -= 1
+    return loaded, failed
 
 
 def journal_errors(text: str) -> tuple[str, ...]:
@@ -362,7 +415,11 @@ def journal_errors(text: str) -> tuple[str, ...]:
 
 
 def evaluate_verify(
-    st: TerminalStatus, journal: str, expected: set[str], *, require_start: bool = False
+    st: TerminalStatus,
+    journal: str,
+    expected: Mapping[Instance, int],
+    *,
+    require_start: bool = False,
 ) -> VerifyReport:
     """Judge one health snapshot (pure).
 
@@ -371,19 +428,20 @@ def evaluate_verify(
     got going, and a terminal with no experts and an unknown connection would
     otherwise pass on the service state alone.
     """
-    loaded = {
-        m["name"].strip().lower() for m in mt5spec.LOG_EXPERT_LOADED_RE.finditer(journal)
-    }
-    failed_names = {
-        m["name"].strip().lower() for m in mt5spec.LOG_EXPERT_FAILED_RE.finditer(journal)
-    }
+    loaded_n, failed_n = journal_instances(journal)
     journal_state, _ = journal_connection(journal)
     connected = st.connected if st.connected is not None else journal_state
-    ok_names = sorted(
-        n for n in expected if n.lower() in loaded and n.lower() not in failed_names
-    )
-    failed = sorted(n for n in expected if n.lower() in failed_names)
-    pending = sorted(n for n in expected if n not in ok_names and n not in failed)
+    ok_names: list[str] = []
+    failed: list[str] = []
+    pending: list[str] = []
+    for instance, count in sorted(expected.items()):
+        key = _key(*instance)
+        ok = min(count, loaded_n[key])
+        bad = min(count - ok, failed_n[key])
+        label = instance_label(instance)
+        ok_names += [label] * ok
+        failed += [label] * bad
+        pending += [label] * (count - ok - bad)
     trading_disabled = journal_trading_disabled(journal) or st.trading_disabled
     algo_trading = journal_algo_trading(since_latest_start(journal))
     if algo_trading is None:
@@ -446,7 +504,7 @@ async def _verify(
     registry: Registry,
     term: Terminal,
     journal: Callable[[], Awaitable[str]],
-    expected: set[str],
+    expected: Mapping[Instance, int],
     *,
     timeout: float,
     interval: float,
@@ -476,9 +534,22 @@ def _since_latest_start(host: Host, term: Terminal) -> Callable[[], Awaitable[st
     return read
 
 
-async def _live_experts(registry: Registry, term: Terminal) -> set[str]:
-    state = await collect_state(registry, term, [])
-    return expected_experts(ref for ref in state.charts.values() if ref is not None)
+def _parse_charts(raw: Mapping[str, bytes | None]) -> list[ChartFile | None]:
+    out: list[ChartFile | None] = []
+    for data in raw.values():
+        try:
+            out.append(ChartFile.parse(data) if data is not None else None)
+        except ChartFormatError:
+            out.append(None)
+    return out
+
+
+def bundle_instances(bundle: Bundle) -> Counter[Instance]:
+    return chart_instances(_parse_charts({p: bundle.contents.get(p) for p in bundle.charts}))
+
+
+async def _live_experts(registry: Registry, term: Terminal) -> Counter[Instance]:
+    return chart_instances(_parse_charts(await _profile_charts(registry, term)))
 
 
 async def verify(
@@ -940,7 +1011,7 @@ async def deploy(
                 registry,
                 term,
                 _since_latest_start(host, term),
-                expected_experts(bundle.chart_experts.values()),
+                bundle_instances(bundle),
                 timeout=0.0,
                 interval=interval,
             )
@@ -997,7 +1068,7 @@ async def deploy(
             registry,
             term,
             _since(host, term, cursor),
-            expected_experts(bundle.chart_experts.values()),
+            bundle_instances(bundle),
             timeout=timeout,
             interval=interval,
             require_start=True,

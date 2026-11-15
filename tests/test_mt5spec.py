@@ -7,6 +7,8 @@ under Wine (home folder renamed, host details removed).
 
 from __future__ import annotations
 
+from collections import Counter
+
 from builders import CHARTS, FIXTURES
 from mt5ctl import mt5spec, operations
 from mt5ctl.chart import ChartFile, Timeframe
@@ -161,8 +163,12 @@ def test_investor_mode_means_trading_disabled() -> None:
     assert operations.journal_trading_disabled(until(INVESTOR, "authorized")) is None
     assert operations.journal_trading_disabled(INVESTOR) == "investor mode"
     st = TerminalStatus("t", "h", Env.DEMO, "active", connected=True)
-    report = operations.evaluate_verify(st, INVESTOR, {"MACD Sample"})
-    assert report.loaded == ("MACD Sample",)
+    # the journal of the running terminal: before its exit removed the expert
+    running = "\n".join(ln for ln in INVESTOR.splitlines() if " removed" not in ln)
+    report = operations.evaluate_verify(
+        st, running, Counter({("MACD Sample", "EURUSD", "H1"): 1})
+    )
+    assert report.loaded == ("MACD Sample (EURUSD,H1)",)
     assert not report.healthy
     assert "TRADING DISABLED (investor mode)" in report.detail
 
@@ -177,11 +183,21 @@ def test_failed_expert_lines() -> None:
     failed = {m["name"] for m in mt5spec.LOG_EXPERT_FAILED_RE.finditer(JOURNAL)}
     assert failed == {"ProbeTruncated", "ProbeInitFailed"}
     st = TerminalStatus("t", "h", Env.DEMO, "active", connected=True)
-    expected = {"ProbeOpenCharts", "ProbeInitFailed", "ProbeTruncated", "ProbeCorrupt"}
-    report = operations.evaluate_verify(st, JOURNAL, expected)
-    assert report.loaded == ("ProbeOpenCharts",)
-    assert report.failed == ("ProbeInitFailed", "ProbeTruncated")
-    assert report.pending == ("ProbeCorrupt",)  # random bytes: nothing is logged
+    expected = Counter(
+        {
+            ("ProbeOpenCharts", "EURUSD", "H1"): 1,
+            ("ProbeInitFailed", "USDJPY", "H1"): 1,
+            ("ProbeTruncated", "GBPUSD", "H1"): 1,
+            ("ProbeCorrupt", "AUDUSD", "H1"): 1,
+        }
+    )
+    running = until(JOURNAL, "expert ProbeInitFailed (USDJPY,H1) removed")
+    report = operations.evaluate_verify(st, running, expected)
+    assert report.loaded == ("ProbeOpenCharts (EURUSD,H1)",)
+    assert report.failed == ("ProbeInitFailed (USDJPY,H1)", "ProbeTruncated (GBPUSD,H1)")
+    assert report.pending == ("ProbeCorrupt (AUDUSD,H1)",)  # random bytes: nothing is logged
+    # the terminal's exit removes every expert: the whole file shows none loaded
+    assert operations.evaluate_verify(st, JOURNAL, expected).loaded == ()
 
 
 def test_algo_trading_toggle_lines() -> None:
@@ -190,7 +206,7 @@ def test_algo_trading_toggle_lines() -> None:
     off = until(JOURNAL, "automated trading is disabled")
     assert operations.journal_algo_trading(off) is False
     st = TerminalStatus("t", "h", Env.DEMO, "active", connected=True)
-    report = operations.evaluate_verify(st, off, set())
+    report = operations.evaluate_verify(st, off, Counter())
     assert report.algo_trading is False and not report.healthy
     assert "ALGO TRADING OFF" in report.detail
 
