@@ -168,6 +168,39 @@ journal: with its exit line, it closed itself; without, systemd had to end it,
 and mt5ctl prints a warning. (systemd's `Result` for the unit is no guide: it
 reads `exit-code` even after a clean exit.)
 
+## Without systemd (process mode)
+
+Where there is no systemd (WSL without it, a container, a host where you cannot
+install units), mt5ctl can run the terminal itself. Instead of `service`, give
+the terminal a `start_command` and a `stop_command`:
+
+```yaml
+terminals:
+  demo1:
+    host: box
+    data_dir: /home/trader/mt5/demo1
+    start_command: >-
+      export WINEPREFIX=/home/trader/mt5/demo1-prefix;
+      exec xvfb-run -n 91 -f /home/trader/mt5/demo1.Xauthority
+      wine terminal64.exe /portable /skipupdate '/config:cfg\login.ini'
+    stop_command: >-
+      WINEPREFIX=/home/trader/mt5/demo1-prefix DISPLAY=:91
+      XAUTHORITY=/home/trader/mt5/demo1.Xauthority
+      /home/trader/mt5/stop-terminal.sh
+```
+
+- `start` runs `start_command` in the data folder as a background process group
+  and keeps its pid in `.mt5ctl/terminal.pid`; its output goes to
+  `.mt5ctl/terminal.out`.
+- `stop` runs `stop_command` with `$MAINPID` set, so the same
+  `stop-terminal.sh` serves both modes. It waits up to 50 s for the group to
+  exit, then ends it (TERM, then KILL). Whether the terminal closed itself is
+  told by its journal, as with systemd.
+- `deploy`, `restart`, `status` and `verify` work the same way.
+
+What you give up: nothing restarts the terminal if it crashes or the host
+reboots. Use a systemd unit where you can; process mode is for where you cannot.
+
 ## Algo Trading
 
 The terminal's **Algo Trading** button must be on for any expert to trade. Its

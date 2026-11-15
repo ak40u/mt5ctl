@@ -284,8 +284,9 @@ your hosts. The full template is
 |---|---|
 | `host` | a host from `hosts:` |
 | `data_dir` | the folder containing `MQL5/`; for a `/portable` terminal, the install folder |
-| `service` | its systemd unit; needed by `deploy`, `status`, `restart` |
+| `service` | its systemd unit; needed by `deploy`, `start`, `stop`, `restart` (or use `start_command`) |
 | `service_scope` | `system` (default, via `sudo -n systemctl`) or `user` (`systemctl --user`) |
+| `start_command`, `stop_command` | without systemd: mt5ctl runs the terminal itself ([process mode](docs/deploy.md#without-systemd-process-mode)) |
 | `profile` | the chart profile mt5ctl manages, default `Default` |
 | `env` | `demo` (default) or `live` |
 | `wine`, `wineprefix`, `display` | for `compile`: the terminal's own Wine build, its prefix and X display. Set `wine` whenever `wineprefix` is set: another Wine build updates the prefix, and the terminal then stops at a Wine dialog on its next start |
@@ -296,12 +297,14 @@ your hosts. The full template is
 |---|---|---|---|
 | Linux with Wine and systemd, over SSH (`kind: ssh`) | yes | yes | yes |
 | WSL2 on a Windows server, over SSH (`kind: wsl`) | yes | yes | yes |
-| This machine, Linux or macOS (`kind: local`) | yes | with systemd | with Wine |
+| This machine, Linux or macOS (`kind: local`) | yes | yes | with Wine |
 | This machine, Windows (`kind: local`) | `chart`, `bundle`, `plan` | no | no |
 | A remote Windows host (OpenSSH + PowerShell) | not supported | | |
 
-The host needs `bash`, `tar`, `base64` and `sha256sum` (or `shasum`); with `ss`,
-`status` attributes broker connections to each terminal. For a system unit, the
+Terminals run under a systemd unit or, where there is none, in
+[process mode](docs/deploy.md#without-systemd-process-mode). The host needs
+`bash`, `tar`, `base64` and `sha256sum` (or `shasum`); with `ss`, `status`
+attributes broker connections to each terminal. For a system unit, the
 SSH user needs a password-less sudo rule for `systemctl start|stop|restart` of
 that unit (mt5ctl uses `sudo -n`, which fails instead of prompting); a user unit
 needs no sudo.
@@ -347,8 +350,6 @@ needs no sudo.
   [`mt5spec.py`](src/mt5ctl/mt5spec.py), each with its source.
 - **Timeframes.** Minute and hour timeframes and D1 are supported; W1 and MN1 are
   not yet.
-- **systemd only.** Changing a terminal needs a systemd unit; there is no
-  support for terminals started some other way.
 - **No remote Windows.** Terminals on a Windows host are reachable only through
   WSL2, or with `kind: local` for the read-only commands.
 - **Files only.** mt5ctl does not log in to accounts, change terminal settings or

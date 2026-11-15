@@ -44,5 +44,6 @@ All notable changes to this project are documented here. The format follows
 - W1 and MN1 timeframes; failed expert loads recognised from the journal; `plan`
   explains a chart the terminal saved without its expert.
 - `compile` handles folders with spaces through a space-free stand-in.
+- Process mode: `start_command` / `stop_command` run a terminal without systemd.
 - CLI: `chart show`, `bundle check`, `plan`, `list`, `deploy`, `adopt`, `status`,
   `restart`, `verify`, `compile`, `serve`, all with `--json`.
