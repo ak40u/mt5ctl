@@ -49,5 +49,10 @@ Read-only. Nothing on the host is changed.
 |---|---|
 | `0` | success |
 | `1` | error (message on stderr), or a failed `doctor` check |
-| `2` | `plan`: a deploy would refuse |
+| `2` | `plan`: a deploy would refuse (a conflict, a numbering gap, charts the terminal renumbered) |
 | `3` | a terminal is not healthy (`status`, `verify`, after `deploy`, `start`, `restart`) |
+| `130` | interrupted; the steps that must not be cut short were finished first |
+
+Over MCP, a failed compile or login is a failed call (`isError`); an unhealthy
+verify after a deploy, start or restart is a result, since the operation itself
+was done.

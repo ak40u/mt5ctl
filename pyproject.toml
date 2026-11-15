@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "mt5ctl"
 version = "0.1.0.dev0"
-description = "Idempotent expert-advisor deploys for MetaTrader 5 terminals (Wine, WSL2, Windows)"
+description = "Idempotent expert-advisor deploys for MetaTrader 5 terminals (Linux and WSL2 under Wine)"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"

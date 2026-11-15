@@ -256,8 +256,9 @@ midway, the terminal is still started again and the lock released.
 |---|---|
 | `0` | success; for `plan`, the deploy can proceed |
 | `1` | error: bad bundle, unreachable host, corrupt manifest, failed compile… (on stderr) |
-| `2` | `plan`: a deploy would refuse, because a bundle file would overwrite a file mt5ctl does not manage |
-| `3` | the terminal is not healthy (after `deploy` or `restart`, in `verify`, in `status`) |
+| `2` | `plan`: a deploy would refuse: a bundle file would overwrite a file mt5ctl does not manage, the numbering would have a gap, or the terminal renumbered its charts |
+| `3` | the terminal is not healthy (after `deploy`, `start` or `restart`, in `verify`, in `status`) |
+| `130` | interrupted (Ctrl-C, SIGTERM); what must not be cut short was finished first |
 
 ## Bundles
 
@@ -274,6 +275,11 @@ bundles/demo1/
 - One profile per bundle, matching the terminal's `profile` (default `Default`); a bundle with charts for another profile is refused.
 - A chart's expert is found through its `path=` line (`Experts\Portfolio\…ex5`)
   and must be in the bundle.
+- Build charts the way the terminal saves them. A chart written by hand or with
+  the Python API may lack inputs the terminal adds when it saves; the next
+  deploy then sees a change every time and restarts the terminal for nothing.
+  After the first deploy, copy the charts back from the terminal into the
+  bundle.
 - A chart without an expert is fine — for example, to put a symbol into Market
   Watch for currency conversion.
 - Number charts so that, together with the foreign charts on the terminal, they
@@ -302,7 +308,7 @@ your hosts. The full template is
 |---|---|
 | `host` | a host from `hosts:` |
 | `data_dir` | the folder containing `MQL5/`; for a `/portable` terminal, the install folder |
-| `service` | its systemd unit; needed by `deploy`, `start`, `stop`, `restart` (or use `start_command`) |
+| `service` | its systemd unit; needed by `deploy`, `start`, `stop`, `restart`, `login` (or use `start_command`); `status` works without it |
 | `service_scope` | `system` (default, via `sudo -n systemctl`) or `user` (`systemctl --user`) |
 | `start_command`, `stop_command` | without systemd: mt5ctl runs the terminal itself ([process mode](docs/deploy.md#without-systemd-process-mode)) |
 | `profile` | the chart profile mt5ctl manages, default `Default` |
@@ -331,11 +337,15 @@ needs no sudo.
 
 ## Safety
 
-- **One run at a time.** Deploy, adopt and restart hold a per-terminal lock; a
-  second run refuses until the first finishes.
-- **Nothing is written while the terminal runs.** After `systemctl stop`, mt5ctl
-  waits until no terminal process is left in the unit's cgroup, then plans again
-  on the files the terminal left behind.
+- **One run at a time.** Deploy, adopt, start, stop, restart and login hold a
+  per-terminal lock; a second run refuses, naming the holder, until the first
+  finishes.
+- **No strategy file is written while the terminal runs.** After `systemctl
+  stop`, mt5ctl waits until no terminal process is left in the unit's cgroup,
+  checks that no other terminal still works in the data folder, then plans again
+  on the files the terminal left behind. (`adopt` writes only its manifest, the
+  lock lives in `.mt5ctl/`, and `compile` uses a temporary folder in
+  `MQL5/Experts`, all while the terminal runs.)
 - **Verified uploads.** Each file's sha256 is checked on the host before anything
   is moved into place; the manifest is written last.
 - **Back to the previous state on failure.** A failed apply puts every touched
@@ -372,9 +382,21 @@ needs no sudo.
 ## Limitations
 
 - **Checked against one build.** File formats and journal lines are checked
-  against MetaTrader 5 build 6320 under Wine 11. Every assumption about
+  against MetaTrader 5 build 6320 under Wine 11 (all 21 timeframes, W1 and MN1
+  included, and the real lines of failed expert loads). Every assumption about
   undocumented behaviour is in one module, [`mt5spec.py`](src/mt5ctl/mt5spec.py),
   each with its source; of `expertmode`, only the "Allow Algo Trading" bit is known.
+- **The broker connection is judged by sockets first.** `status` counts the
+  terminal's established connections to port 443 when it can attribute them,
+  and reads the journal otherwise. A broker on another port would show as not
+  connected.
+- **A confirmation is the caller's word.** `--confirm` / `confirm=true` is what
+  lets a change reach a live terminal; over MCP the model sets it, so it is a
+  guard against mistakes, not proof that a person agreed. Clients that ask
+  before a tool marked destructive add that.
+- **mt5ctl runs on the machine that drives the deploy.** If that machine loses
+  power, or mt5ctl is killed outright, mid-deploy, the terminal may stay
+  stopped and the lock stay until it expires (an hour).
 - **Algo Trading is read from the journal.** The terminal keeps the button's
   state in a binary file, so mt5ctl sees it only when it was switched after the
   latest start. Switch it on with the start config
@@ -382,13 +404,14 @@ needs no sudo.
 - **A damaged expert file can go unnoticed in the journal.** A truncated `.ex5`
   and a failing `OnInit` are reported as failed; a file of random bytes logs
   nothing and is reported as "not loaded".
-- **Compiling needs a path without spaces** for the terminal's data folder;
-  folders with spaces inside the sources are handled.
+- **Compiling needs a path without spaces** for the terminal's data folder
+  (MetaEditor skips a folder whose path has one); folders with spaces inside the
+  sources are mirrored, include files and all.
 - **No remote Windows yet.** Terminals on a Windows host are reachable through
   WSL2, or with `kind: local` for the read-only commands. The plan is in
   [docs/windows.md](docs/windows.md).
-- **Files only.** mt5ctl does not log in to accounts, change terminal settings or
-  manage Market Watch.
+- **Files and one login.** Apart from `login`, mt5ctl does not touch accounts,
+  terminal settings or Market Watch.
 
 ## Documentation
 

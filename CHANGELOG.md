@@ -6,6 +6,38 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed (from two independent reviews)
+
+- The lock: its owner is written atomically with it, its timestamp is never
+  evaluated by the shell, two runs can no longer both take over a stale one,
+  and a run whose lock was taken over cannot write.
+- A failed apply is restored honestly: nothing is removed before the backup is
+  known to be readable, success is reported only when every file is back, and a
+  deploy cut short completes when run again.
+- Interruptions (Ctrl-C, SIGTERM, SIGHUP, a cancelled MCP call, a timeout) never
+  cut an apply short, never leave a script writing behind, and the terminal is
+  started again; the start is retried while the host cannot be reached.
+- A symbolic link inside the data folder can no longer make a deploy write
+  outside it.
+- Charts the terminal renumbered (after one was closed by hand) block the
+  deploy instead of being overwritten or run twice.
+- A bundle for another profile is refused instead of planning the removal of
+  every managed chart; the deploy uploads the bytes it checked.
+- Verify counts the expert of every chart (an expert on three charts must load
+  three times), finds a start however long ago, and is never healthy when it
+  cannot tell this start from an earlier one.
+- A foreign chart's expert path is read the way Wine follows it, so the expert
+  it runs is not removed.
+- A stopped terminal is left stopped by a deploy; adopt never stops managing
+  files without --replace; a wrong data_dir is refused; a terminal left running
+  on the data folder stops the deploy; files and new folders go to the unit's
+  user.
+- compile mirrors the whole include tree of a folder with a space, skips hidden
+  files, and a failed compile or login is a failed MCP call.
+- Smaller: cut-off scripts and answers are refused, CLI errors print without a
+  traceback, chart names and line endings are checked in bundles, and a
+  long-running MCP server notices a terminal marked live.
+
 ### Added
 
 - Lossless reader and writer for MetaTrader 5 chart files (`mt5ctl.chart`):
