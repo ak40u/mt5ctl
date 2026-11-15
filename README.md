@@ -342,16 +342,22 @@ needs no sudo.
 
 ## Limitations
 
-- **Unconfirmed details.** The journal line for an expert that fails to load
-  follows MetaTrader 4 and has not yet been seen from MetaTrader 5 (an expert
-  that never logs "loaded successfully" is still reported as not loaded). Of
-  `expertmode`, only the "Allow Algo Trading" bit is known. Every assumption
-  about undocumented behaviour is in one module,
-  [`mt5spec.py`](src/mt5ctl/mt5spec.py), each with its source.
-- **Timeframes.** Minute and hour timeframes and D1 are supported; W1 and MN1 are
-  not yet.
-- **No remote Windows.** Terminals on a Windows host are reachable only through
-  WSL2, or with `kind: local` for the read-only commands.
+- **Checked against one build.** File formats and journal lines are checked
+  against MetaTrader 5 build 6320 under Wine 11. Every assumption about
+  undocumented behaviour is in one module, [`mt5spec.py`](src/mt5ctl/mt5spec.py),
+  each with its source; of `expertmode`, only the "Allow Algo Trading" bit is known.
+- **Algo Trading is read from the journal.** The terminal keeps the button's
+  state in a binary file, so mt5ctl sees it only when it was switched after the
+  latest start. Switch it on with the start config
+  ([docs/deploy.md](docs/deploy.md#algo-trading)).
+- **A damaged expert file can go unnoticed in the journal.** A truncated `.ex5`
+  and a failing `OnInit` are reported as failed; a file of random bytes logs
+  nothing and is reported as "not loaded".
+- **Compiling needs a path without spaces** for the terminal's data folder;
+  folders with spaces inside the sources are handled.
+- **No remote Windows yet.** Terminals on a Windows host are reachable through
+  WSL2, or with `kind: local` for the read-only commands. The plan is in
+  [docs/windows.md](docs/windows.md).
 - **Files only.** mt5ctl does not log in to accounts, change terminal settings or
   manage Market Watch.
 
@@ -361,6 +367,7 @@ needs no sudo.
   running terminal, the systemd unit, compiling.
 - [docs/chart-format.md](docs/chart-format.md): chart files, timeframe codes, the
   order file, editing charts from Python.
+- [docs/windows.md](docs/windows.md): what managing a remote Windows host would take.
 - [CHANGELOG.md](CHANGELOG.md), [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Development
