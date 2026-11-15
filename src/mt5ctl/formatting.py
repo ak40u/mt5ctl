@@ -25,6 +25,7 @@ def plan_lines(plan: DeployPlan) -> list[str]:
         ("!", plan.conflicts),
     ):
         lines.extend(f"  {marker} {p}" for p in paths)
+    lines.extend(f"  ! gap: no {name}" for name in plan.gaps)
     lines.extend(f"  keep {p} (still used by a remaining chart)" for p in plan.keep)
     lines.extend(f"  foreign {p} (not managed, left alone)" for p in plan.foreign)
     if plan.order is not None and plan.has_changes:
@@ -37,7 +38,12 @@ def plan_lines(plan: DeployPlan) -> list[str]:
         f"{len(plan.remove)} to remove, {len(plan.unchanged)} unchanged"
     )
     if plan.blocked:
-        summary += f"; BLOCKED by {len(plan.conflicts)} conflict(s)"
+        problems = []
+        if plan.conflicts:
+            problems.append(f"{len(plan.conflicts)} conflict(s)")
+        if plan.gaps:
+            problems.append(f"{len(plan.gaps)} numbering gap(s)")
+        summary += "; BLOCKED by " + " and ".join(problems)
     elif not plan.has_changes:
         summary += "; nothing to do"
     lines.append(summary)

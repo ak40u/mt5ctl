@@ -165,12 +165,15 @@ class Bundle:
         chart_experts: each chart mapped to the expert it runs (charts without
             an expert, e.g. a chart that only adds a symbol to Market Watch,
             are absent).
+        algo_trading_off: charts whose expert has its own "Allow Algo Trading"
+            unticked: they would load but not trade.
     """
 
     root: Path
     profile: str
     files: Mapping[str, str]
     chart_experts: Mapping[str, str]
+    algo_trading_off: tuple[str, ...] = ()
 
     @property
     def charts(self) -> list[str]:
@@ -211,6 +214,7 @@ def read_bundle(path: str | Path, profile: str | None = None) -> Bundle:
 
     files: dict[str, str] = {}
     chart_experts: dict[str, str] = {}
+    algo_off: list[str] = []
     for item in sorted(root.rglob("*")):
         rel = item.relative_to(root).as_posix()
         if item.is_symlink():
@@ -233,6 +237,8 @@ def read_bundle(path: str | Path, profile: str | None = None) -> Bundle:
                         "the Experts folder (Experts\\<folder>\\<name>.ex5)"
                     )
                 chart_experts[rel] = ref
+                if chart.expert.algo_trading is False:
+                    algo_off.append(rel)
         else:
             files[rel] = file_digest(data)
 
@@ -246,4 +252,10 @@ def read_bundle(path: str | Path, profile: str | None = None) -> Bundle:
             raise BundleError(
                 f"chart {chart_rel!r} runs expert {ref!r}, which is missing from the bundle"
             )
-    return Bundle(root=root, profile=chosen, files=files, chart_experts=chart_experts)
+    return Bundle(
+        root=root,
+        profile=chosen,
+        files=files,
+        chart_experts=chart_experts,
+        algo_trading_off=tuple(algo_off),
+    )

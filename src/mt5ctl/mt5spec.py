@@ -42,21 +42,34 @@ PERIOD_CODES: dict[str, tuple[int, int]] = {
     "D1": (1, 24),
 }
 
+# A chart's expert: an <expert> block directly in <chart>, before the first
+# <window>, with name=, path= (relative to MQL5, backslashes), expertmode= and
+# an <inputs> block of name=value lines. Observed (build 6320, expert attached
+# in the terminal and saved on a normal exit). Indicator windows carry their own
+# expertmode=0 lines, unrelated to the expert.
+#
+# expertmode bit 0 is the expert's "Allow Algo Trading" checkbox: unticking it
+# changed expertmode=1 to 0 and nothing else. Observed (build 6320). Other bits
+# (DLL imports, ...) have not been observed.
+EXPERT_MODE_ALGO_TRADING = 0x1
+
 # Chart files are named chart01.chr, chart02.chr, ... in a profile folder.
 # Observed (build 6320).
 CHART_FILE_RE = re.compile(r"chart(\d+)\.chr")
 
 # Each profile folder also holds order.wnd: the chart file names, one per line,
-# in window order (UTF-16LE with BOM, CRLF, final CRLF). Observed (build 6320).
-# Whether the terminal opens a chart file missing from it is not known, so
-# deploys keep it in step: charts removed by the deploy are dropped from it,
-# charts added are listed, foreign entries are kept as they are.
+# in window order (UTF-16LE with BOM, CRLF, final CRLF). Observed (build 6320):
+# the terminal opens a chart file that order.wnd does not list, and rewrites
+# order.wnd when it saves the profile. Deploys still keep it in step (removed
+# charts dropped, added ones listed, other entries kept), so the file never
+# lists a chart that no longer exists.
 PROFILE_ORDER_FILE = "order.wnd"
 
-# Whether the terminal expects chart numbers without gaps. A MetaTrader 4
-# terminal closes gaps when it saves a profile, shifting later charts down. A
-# plan whose resulting profile has gaps gets a warning rather than a refusal.
-# Source: MT4 heritage.
+# The terminal closes gaps in chart numbering when it saves a profile.
+# Observed (build 6320): with chart05 and chart06 missing, chart07.chr was
+# saved as chart05.chr. A managed chart would move to a file name the manifest
+# does not know, so a deploy that would leave gaps is refused.
+# Also observed: a chart id that two files share is replaced by max(id) + 1.
 CHARTS_CONTIGUOUS = True
 
 # --------------------------------------------------------------------------- #
@@ -81,10 +94,10 @@ JOURNAL_DIR = "logs"
 JOURNAL_GLOB = "*.log"
 
 # Journal lines (matched case-insensitively, anywhere in the line).
-# Observed (build 6320): "Terminal  MetaTrader 5 x64 build 6320 started for ..."
-# and "Scripts  script <name> (EURUSD,H1) loaded successfully"; experts log the
-# same way under "Experts". The broker authorization and disconnect lines are
-# MT4 heritage; a terminal without an account logs neither.
+# Observed (build 6320): "Terminal  MetaTrader 5 x64 build 6320 started for ...",
+# "Experts  expert MACD Sample (EURUSD,H1) loaded successfully" and
+# "... removed". The broker authorization, disconnect and failed-load lines are
+# MT4 heritage; a terminal without an account logs none of them.
 LOG_TERMINAL_STARTED_RE = re.compile(r"MetaTrader 5 .*build \d+ started", re.IGNORECASE)
 LOG_AUTHORIZED_RE = re.compile(r"authorized on (\S+)", re.IGNORECASE)
 LOG_CONNECTION_LOST_RE = re.compile(
@@ -103,7 +116,8 @@ LOG_EXPERT_FAILED_RE = re.compile(
 def expert_log_name(relpath: str) -> str:
     """The name the journal uses for an expert: its file name without extension.
 
-    Source: MT4 heritage (``expert <name> (<symbol>,<period>) loaded successfully``).
+    Observed (build 6320): ``Experts\\Examples\\MACD\\MACD Sample.ex5`` logs as
+    ``expert MACD Sample (EURUSD,H1) loaded successfully``.
     """
     return PurePosixPath(relpath).stem
 

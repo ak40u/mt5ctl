@@ -493,11 +493,20 @@ async def _preflight(host: Host, term: Terminal) -> str:
 
 
 def _conflict_message(plan: DeployPlan) -> str:
-    return (
-        "refusing to overwrite files mt5ctl does not manage: "
-        + ", ".join(plan.conflicts)
-        + " — renumber the bundle's charts around them, or adopt the terminal first"
-    )
+    reasons = []
+    if plan.conflicts:
+        reasons.append(
+            "refusing to overwrite files mt5ctl does not manage: "
+            + ", ".join(plan.conflicts)
+            + " — renumber the bundle's charts around them, or adopt the terminal first"
+        )
+    if plan.gaps:
+        reasons.append(
+            "refusing to leave gaps in chart numbering ("
+            + ", ".join(plan.gaps)
+            + " missing) — the terminal would renumber the charts after them"
+        )
+    return "; ".join(reasons)
 
 
 def build_upload(

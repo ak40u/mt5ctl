@@ -244,6 +244,13 @@ class Expert:
         """Value of one input, or ``None`` when the expert has no such input."""
         return next((v for k, v in self.inputs if k == key), None)
 
+    @property
+    def algo_trading(self) -> bool | None:
+        """Whether the expert's own "Allow Algo Trading" is ticked; ``None`` if unknown."""
+        if self.mode is None:
+            return None
+        return bool(self.mode & mt5spec.EXPERT_MODE_ALGO_TRADING)
+
 
 def _int_or_none(value: str | None) -> int | None:
     if value is None:

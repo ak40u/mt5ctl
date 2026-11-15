@@ -193,15 +193,28 @@ def test_empty_manifest_behaves_like_first_deploy_for_free_paths() -> None:
     assert plan.add == (A,)
 
 
-def test_numbering_gap_is_noted() -> None:
+def test_numbering_gap_blocks() -> None:
     plan = compute_plan(bundle({C1: "chart:1", C3: "chart:3"}), state())
-    assert any("chart02 missing" in n for n in plan.notes)
+    assert plan.gaps == ("chart02.chr",)
+    assert plan.blocked
+    assert any("closes gaps" in n for n in plan.notes)
 
 
-def test_bundle_numbered_around_foreign_chart_has_no_gap_note() -> None:
+def test_removing_a_middle_managed_chart_with_a_foreign_one_after_blocks() -> None:
+    plan = compute_plan(
+        bundle({C1: "chart:1"}),
+        state(
+            manifest={C1: "chart:1", C2: "chart:2"}, files={C1: "chart:1"}, charts={W: None}
+        ),
+    )
+    assert plan.remove == (C2,)
+    assert plan.gaps == tuple(f"chart{n:02d}.chr" for n in range(2, 9))
+
+
+def test_bundle_numbered_around_foreign_chart_has_no_gap() -> None:
     plan = compute_plan(bundle({C1: "chart:1", C3: "chart:3"}), state(charts={C2: None}))
     assert plan.foreign == (C2,)
-    assert not any("gaps" in n for n in plan.notes)
+    assert plan.gaps == () and not plan.blocked
 
 
 def test_gap_check_follows_the_spec_switch(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -209,7 +222,7 @@ def test_gap_check_follows_the_spec_switch(monkeypatch: pytest.MonkeyPatch) -> N
 
     monkeypatch.setattr(mt5spec, "CHARTS_CONTIGUOUS", False)
     plan = compute_plan(bundle({C3: "chart:3"}), state())
-    assert plan.notes == ()
+    assert plan.gaps == () and plan.notes == ()
 
 
 # -- window order ----------------------------------------------------------- #

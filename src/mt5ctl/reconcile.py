@@ -17,6 +17,9 @@ Rules (managed-subset reconcile):
   removing a file a live chart may need is the worse mistake.
 * Live charts that are neither in the bundle nor managed are reported as
   *foreign* and left alone.
+* The charts left after the deploy (bundle and foreign) must be numbered
+  chart01, chart02, ... without gaps, or the deploy is blocked: the terminal
+  renumbers charts to close gaps when it saves the profile.
 """
 
 from __future__ import annotations
@@ -68,6 +71,9 @@ class DeployPlan:
     foreign: tuple[str, ...] = ()
     conflicts: tuple[str, ...] = ()
     notes: tuple[str, ...] = ()
+    gaps: tuple[str, ...] = ()
+    """Chart file names missing from the profile's numbering after the deploy.
+    Any gap blocks the deploy (see :data:`mt5ctl.mt5spec.CHARTS_CONTIGUOUS`)."""
     order: tuple[str, ...] | None = None
     """The profile's new window order, when the deploy changes it; written along
     with the other changes (it never causes a deploy on its own)."""
@@ -78,7 +84,7 @@ class DeployPlan:
 
     @property
     def blocked(self) -> bool:
-        return bool(self.conflicts)
+        return bool(self.conflicts or self.gaps)
 
 
 def compute_plan(bundle: Bundle, state: TerminalState) -> DeployPlan:
@@ -150,9 +156,15 @@ def compute_plan(bundle: Bundle, state: TerminalState) -> DeployPlan:
             remove.append(path)
 
     foreign = sorted(c for c in state.charts if c not in bundle_charts and c not in managed)
-    gap_note = _numbering_gap_note([*bundle_charts, *foreign])
-    if gap_note:
-        notes.append(gap_note)
+    gaps = _numbering_gaps([*bundle_charts, *foreign])
+    if gaps:
+        notes.append(
+            f"chart numbering would have gaps ({', '.join(gaps[:5])}"
+            f"{' ...' if len(gaps) > 5 else ''} missing): the terminal closes gaps when it "
+            "saves the profile, which would move managed charts to other file names; "
+            "number the bundle's charts so that, with the foreign ones, they run "
+            "chart01, chart02, ... without holes"
+        )
     order = _next_order(state, [*bundle_charts, *foreign])
     return DeployPlan(
         add=tuple(add),
@@ -163,34 +175,23 @@ def compute_plan(bundle: Bundle, state: TerminalState) -> DeployPlan:
         foreign=tuple(foreign),
         conflicts=tuple(conflicts),
         notes=tuple(notes),
+        gaps=tuple(gaps),
         order=order,
     )
 
 
-def _numbering_gap_note(charts: list[str]) -> str | None:
-    """Warn when the profile after the deploy would have gaps in chart numbers.
-
-    See :data:`mt5ctl.mt5spec.CHARTS_CONTIGUOUS`: a terminal that closes gaps
-    when it saves the profile would shift the later charts onto other file
-    names, and the next plan would see them as changed.
-    """
+def _numbering_gaps(charts: list[str]) -> list[str]:
+    """Chart file names missing between chart01 and the highest number in *charts*."""
     if not mt5spec.CHARTS_CONTIGUOUS:
-        return None
-    numbers = sorted(
+        return []
+    numbers = {
         int(m.group(1))
         for c in charts
         if (m := mt5spec.CHART_FILE_RE.fullmatch(c.rsplit("/", 1)[-1])) is not None
-    )
-    if not numbers or numbers == list(range(1, len(numbers) + 1)):
-        return None
-    missing = sorted(set(range(1, numbers[-1] + 1)) - set(numbers))
-    shown = ", ".join(f"chart{n:02d}" for n in missing[:5]) + (
-        " ..." if len(missing) > 5 else ""
-    )
-    return (
-        f"chart numbering will have gaps ({shown} missing); number bundle charts so that "
-        "together with foreign charts they run chart01, chart02, ... without holes"
-    )
+    }
+    if not numbers:
+        return []
+    return [f"chart{n:02d}.chr" for n in range(1, max(numbers) + 1) if n not in numbers]
 
 
 def _next_order(state: TerminalState, charts_after: list[str]) -> tuple[str, ...] | None:

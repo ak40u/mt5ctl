@@ -64,7 +64,7 @@ windows_total=2
 <expert>
 name=Trend EURUSD H4
 path=Experts\Portfolio\Trend EURUSD H4.ex5
-expertmode=33
+expertmode=1
 <inputs>
 RiskPerTrade=100.0
 MagicNumber=1001

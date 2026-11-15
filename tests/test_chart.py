@@ -127,7 +127,7 @@ def test_fixture_expert_view() -> None:
     assert expert is not None
     assert expert.name == "Trend EURUSD H4"
     assert expert.path == r"Experts\Portfolio\Trend EURUSD H4.ex5"
-    assert expert.mode == 33
+    assert expert.mode == 1
     assert expert.input("MagicNumber") == "1001"
     assert expert.input("CustomComment") == "Trend EURUSD H4 = v2"
     assert expert.input("Note") == "Größe €"
@@ -142,7 +142,7 @@ def test_chart_without_expert() -> None:
 
 
 def test_unparsable_mode_and_period_are_none() -> None:
-    text = chart_text().replace("expertmode=33", "expertmode=x").replace("period_size=4", "")
+    text = chart_text().replace("expertmode=1", "expertmode=x").replace("period_size=4", "")
     chart = ChartFile.parse(text.encode())
     assert chart.expert is not None and chart.expert.mode is None
     assert chart.timeframe is None
@@ -220,7 +220,7 @@ def test_set_symbol_and_timeframe() -> None:
 
 
 def test_set_expert_replaces_in_place_and_keeps_unknown_keys() -> None:
-    text = chart_text().replace("expertmode=33", "expertmode=33\r\ncustom_key=kept")
+    text = chart_text().replace("expertmode=1", "expertmode=1\r\ncustom_key=kept")
     chart = ChartFile.parse(text.encode())
     chart.set_expert(
         Expert(
@@ -244,7 +244,7 @@ def test_set_expert_replaces_in_place_and_keeps_unknown_keys() -> None:
 def test_set_expert_without_mode_keeps_existing_mode() -> None:
     chart = ChartFile.parse(chart_bytes())
     chart.set_expert(Expert(name="X", path=r"Experts\X.ex5"))
-    assert chart.expert is not None and chart.expert.mode == 33
+    assert chart.expert is not None and chart.expert.mode == 1
     assert chart.expert.inputs == ()
 
 
@@ -315,7 +315,7 @@ def test_fingerprint_ignores_display_and_encoding() -> None:
         {"expert_path": r"Experts\Portfolio\Other.ex5"},
         {"inputs": (("MagicNumber", "1002"),)},
         {"inputs": ()},
-        {"mode": 1},
+        {"mode": 0},
         {"expert_path": None},
     ],
 )

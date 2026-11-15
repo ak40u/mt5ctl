@@ -18,7 +18,7 @@ def chart_text(
     period: tuple[int, int] = (1, 4),
     expert_path: str | None = r"Experts\Portfolio\Trend.ex5",
     inputs: Sequence[tuple[str, str]] = (("MagicNumber", "1001"),),
-    mode: int = 33,
+    mode: int = 1,
     scroll: int = 1,
 ) -> str:
     """A small but structurally complete chart (``scroll`` varies display only)."""

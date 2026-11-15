@@ -42,13 +42,22 @@ from mt5ctl.transport import CommandResult
 
 BREAKOUT = "MQL5/Experts/Portfolio/Breakout.ex5"
 WATCHDOG = "MQL5/Experts/Tools/Watchdog.ex5"
-WATCHDOG_CHART = "MQL5/Profiles/Charts/Default/chart09.chr"
+WATCHDOG_CHART = "MQL5/Profiles/Charts/Default/chart03.chr"
 
 
 def bundle_v1(root: Path) -> Path:
     return write_tree(
         root,
         charts={"chart01.chr": chart_bytes()},
+        experts={EXPERT: b"trend v1"},
+    )
+
+
+def bundle_v1b(root: Path) -> Path:
+    """Trend back to v1; chart02 keeps a symbol open without an expert."""
+    return write_tree(
+        root,
+        charts={"chart01.chr": chart_bytes(), "chart02.chr": chart_bytes(expert_path=None)},
         experts={EXPERT: b"trend v1"},
     )
 
@@ -114,21 +123,34 @@ def test_redeploy_is_a_no_op_without_restart(farm: Farm, tmp_path: Path) -> None
 
 def test_update_add_remove_keep_foreign_and_back_up(farm: Farm, tmp_path: Path) -> None:
     farm.journal_on_start("Trend", "Breakout")
-    deploy(farm, bundle_v2(tmp_path / "v2"))
-    # A watchdog attached by hand, foreign to mt5ctl.
+    # A watchdog attached by hand on chart03, foreign to mt5ctl.
     write_tree(
         farm.data,
-        charts={"chart09.chr": chart_bytes(expert_path=r"Experts\Tools\Watchdog.ex5")},
+        charts={"chart03.chr": chart_bytes(expert_path=r"Experts\Tools\Watchdog.ex5")},
         experts={WATCHDOG: b"wd"},
     )
-    result = deploy(farm, bundle_v1(tmp_path / "v1"))
-    assert result.plan.update == (EXPERT,)
-    assert result.plan.remove == (BREAKOUT, CHART2)
+    deploy(farm, bundle_v2(tmp_path / "v2"))
+    result = deploy(farm, bundle_v1b(tmp_path / "v1b"))
+    assert result.plan.update == (EXPERT, CHART2)
+    assert result.plan.remove == (BREAKOUT,)
     assert result.plan.foreign == (WATCHDOG_CHART,)
-    assert not (farm.data / CHART2).exists() and not (farm.data / BREAKOUT).exists()
+    assert not (farm.data / BREAKOUT).exists()
+    assert ChartFile.read(farm.data / CHART2).expert is None
     assert (farm.data / WATCHDOG_CHART).exists() and (farm.data / WATCHDOG).exists()
     assert (farm.data / EXPERT).read_bytes() == b"trend v1"
     assert result.backup is not None and Path(result.backup).is_file()
+
+
+def test_removing_a_middle_chart_is_refused(farm: Farm, tmp_path: Path) -> None:
+    """chart02 gone with a foreign chart03 left: the terminal would rename chart03."""
+    farm.journal_on_start("Trend", "Breakout")
+    write_tree(farm.data, charts={"chart03.chr": chart_bytes(expert_path=None)})
+    deploy(farm, bundle_v2(tmp_path / "v2"))
+    calls = list(farm.calls)
+    with pytest.raises(DeployError, match=r"gaps in chart numbering \(chart02\.chr missing\)"):
+        deploy(farm, bundle_v1(tmp_path / "v1"))
+    assert farm.calls == calls
+    assert (farm.data / CHART2).exists()
 
 
 def test_charts_saved_on_stop_are_re_placed(farm: Farm, tmp_path: Path) -> None:
@@ -270,19 +292,20 @@ def test_adopt_records_what_runs_and_deploy_continues_from_there(
         farm.data,
         charts={
             "chart01.chr": chart_bytes(scroll=0),
-            "chart09.chr": chart_bytes(expert_path=r"Experts\Tools\Watchdog.ex5"),
+            "chart02.chr": chart_bytes(expert_path=r"Experts\Tools\Watchdog.ex5"),
         },
         experts={EXPERT: b"trend v0", WATCHDOG: b"wd"},
     )
     result = asyncio.run(operations.adopt(farm.registry, "demo1", bundle))
     assert result.adopted == (EXPERT, CHART1)
     assert result.drifted == (EXPERT,)
-    assert result.foreign == (WATCHDOG_CHART,)
+    assert result.foreign == (CHART2,)
     assert farm.calls == []
     report = asyncio.run(operations.plan(farm.registry, "demo1", bundle))
     assert report.plan.update == (EXPERT,)
     assert report.plan.unchanged == (CHART1,)
-    assert report.plan.foreign == (WATCHDOG_CHART,)
+    assert report.plan.foreign == (CHART2,)
+    assert not report.plan.blocked
 
 
 def test_adopt_refuses_a_bundle_the_terminal_does_not_run(farm: Farm, tmp_path: Path) -> None:
@@ -470,12 +493,12 @@ def test_kept_expert_stays_managed(farm: Farm, tmp_path: Path) -> None:
     farm.journal_on_start("Trend", "Breakout")
     v2 = bundle_v2(tmp_path / "v2")
     deploy(farm, v2)
-    # A foreign chart starts running Breakout; v1 drops it from the bundle.
+    # A foreign chart starts running Breakout; v1b drops it from the bundle.
     write_tree(
         farm.data,
-        charts={"chart09.chr": chart_bytes(expert_path=r"Experts\Portfolio\Breakout.ex5")},
+        charts={"chart03.chr": chart_bytes(expert_path=r"Experts\Portfolio\Breakout.ex5")},
     )
-    result = deploy(farm, bundle_v1(tmp_path / "v1"))
+    result = deploy(farm, bundle_v1b(tmp_path / "v1b"))
     assert result.plan.keep == (BREAKOUT,)
     assert BREAKOUT in manifest(farm)
     # Bringing it back is an ordinary deploy, not a conflict.
@@ -551,18 +574,24 @@ ORDER = "MQL5/Profiles/Charts/Default/order.wnd"
 
 
 def test_deploy_keeps_the_order_file_in_step(farm: Farm, tmp_path: Path) -> None:
-    # A terminal with a real order file listing a foreign chart.
-    write_tree(farm.data, charts={"chart09.chr": chart_bytes(expert_path=None)})
+    # A real order file (it lists chart04 .. chart01) and a foreign chart03.
+    write_tree(farm.data, charts={"chart03.chr": chart_bytes(expert_path=None)})
     (farm.data / ORDER).write_bytes((FIXTURES / "profile/order.wnd").read_bytes())
     farm.journal_on_start("Trend", "Breakout")
     deploy(farm, bundle_v2(tmp_path / "v2"))
     data = (farm.data / ORDER).read_bytes()
     assert data.startswith(b"\xff\xfe") and data.endswith("\r\n".encode("utf-16-le"))
-    # The real file lists chart04..chart01; entries of charts that do not exist are
-    # dropped, listed charts keep their places, unlisted ones are appended.
-    assert parse_order(data) == ("chart02.chr", "chart01.chr", "chart09.chr")
+    # The entry of a chart that does not exist is dropped; the rest keep their places.
+    assert parse_order(data) == ("chart03.chr", "chart02.chr", "chart01.chr")
+
+
+def test_order_file_lists_new_charts(farm: Farm, tmp_path: Path) -> None:
+    farm.journal_on_start("Trend")
     deploy(farm, bundle_v1(tmp_path / "v1"))
-    assert parse_order((farm.data / ORDER).read_bytes()) == ("chart01.chr", "chart09.chr")
+    assert parse_order((farm.data / ORDER).read_bytes()) == ("chart01.chr",)
+    farm.journal_on_start("Trend", "Breakout")
+    deploy(farm, bundle_v2(tmp_path / "v2"))
+    assert parse_order((farm.data / ORDER).read_bytes()) == ("chart01.chr", "chart02.chr")
 
 
 def test_failed_apply_restores_the_order_file(

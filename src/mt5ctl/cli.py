@@ -48,6 +48,7 @@ def _chart_payload(chart: ChartFile) -> dict[str, Any]:
             "name": expert.name,
             "path": expert.path,
             "mode": expert.mode,
+            "algo_trading": expert.algo_trading,
             "inputs": dict(expert.inputs),
         },
         "encoding": fmt.encoding + ("+bom" if fmt.bom else ""),
@@ -70,7 +71,9 @@ def _cmd_chart_show(args: argparse.Namespace) -> int:
         return EXIT_OK
     print(f"expert     {expert['name']}")
     print(f"path       {expert['path']}")
-    print(f"mode       {expert['mode'] if expert['mode'] is not None else '-'}")
+    algo = {True: " (algo trading allowed)", False: " (algo trading OFF)", None: ""}
+    mode = expert["mode"] if expert["mode"] is not None else "-"
+    print(f"mode       {mode}{algo[chart.expert.algo_trading if chart.expert else None]}")
     print(f"inputs     {len(expert['inputs'])}")
     width = max((len(k) for k in expert["inputs"]), default=0)
     for key, value in expert["inputs"].items():
@@ -86,6 +89,7 @@ def _bundle_payload(bundle: Bundle) -> dict[str, Any]:
         "profile": bundle.profile,
         "charts": {c: bundle.chart_experts.get(c) for c in bundle.charts},
         "experts": bundle.experts,
+        "algo_trading_off": list(bundle.algo_trading_off),
     }
 
 
@@ -104,6 +108,9 @@ def _cmd_bundle_check(args: argparse.Namespace) -> int:
     unused = sorted(set(bundle.experts) - set(bundle.chart_experts.values()))
     for expert in unused:
         print(f"  note: {expert} is not used by any chart")
+    for chart in bundle.algo_trading_off:
+        name = chart.rsplit("/", 1)[-1]
+        print(f"  warning: {name} has algo trading turned off; its expert will not trade")
     return EXIT_OK
 
 

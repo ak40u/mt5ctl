@@ -69,3 +69,58 @@ def test_compile_result_line() -> None:
     log = decode_lenient((FIXTURES / "logs/compile.log").read_bytes())
     match = mt5spec.COMPILE_RESULT_RE.search(log)
     assert match is not None and match.groups() == ("0", "0")
+
+
+# -- charts with an expert, attached in the terminal and saved on exit ------ #
+
+
+ON = CHARTS / "terminal-expert-algo-on.chr"
+OFF = CHARTS / "terminal-expert-algo-off.chr"
+
+
+def test_real_expert_block() -> None:
+    chart = ChartFile.read(ON)
+    expert = chart.expert
+    assert expert is not None
+    assert (expert.name, expert.path, expert.mode) == (
+        "MACD Sample",
+        r"Experts\Examples\MACD\MACD Sample.ex5",
+        1,
+    )
+    assert expert.input("InpLots") == "0.1" and len(expert.inputs) == 6
+    # The expert block sits before the first window, where set_expert puts it.
+    tags = [c.tag for c in chart.chart.children if hasattr(c, "tag")]
+    assert tags.index("expert") < tags.index("window")
+
+
+def test_algo_trading_bit() -> None:
+    on, off = ChartFile.read(ON), ChartFile.read(OFF)
+    assert on.expert is not None and on.expert.algo_trading is True
+    assert off.expert is not None and off.expert.algo_trading is False
+    # Unticking "Allow Algo Trading" changes expertmode and nothing else.
+    differing = [
+        (a, b)
+        for a, b in zip(
+            on.to_bytes().decode("utf-16").splitlines(),
+            off.to_bytes().decode("utf-16").splitlines(),
+            strict=True,
+        )
+        if a != b
+    ]
+    assert differing == [("expertmode=1", "expertmode=0")]
+    assert on.fingerprint() != off.fingerprint()
+
+
+def test_real_expert_chart_round_trips_and_edits() -> None:
+    data = ON.read_bytes()
+    chart = ChartFile.parse(data)
+    assert chart.to_bytes() == data
+    chart.set_input("InpLots", "0.2")
+    edited = chart.to_bytes().decode("utf-16")
+    assert edited == data.decode("utf-16").replace("InpLots=0.1", "InpLots=0.2")
+
+
+def test_expert_log_name_matches_the_journal() -> None:
+    name = mt5spec.expert_log_name(r"MQL5/Experts/Examples/MACD/MACD Sample.ex5")
+    loaded = {m["name"] for m in mt5spec.LOG_EXPERT_LOADED_RE.finditer(JOURNAL)}
+    assert name in loaded
