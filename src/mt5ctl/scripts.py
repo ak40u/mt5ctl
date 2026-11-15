@@ -295,8 +295,36 @@ fi
 """
 
 
+def no_links(paths: Iterable[str], fail: str) -> str:
+    """Script lines that run *fail* (with ``$bad`` set) when any folder on the way
+    to one of *paths*, below the data folder, is a symbolic link.
+
+    ``mkdir -p``, ``mv``, ``rm`` and ``tar`` follow a link in a parent folder, so
+    such a link would let a deploy write outside the data folder. The data
+    folder itself may be a link; the last component may be one too (``mv`` and
+    ``rm`` replace a link, they do not follow it).
+    """
+    listed = " ".join(sh_quote(p) for p in [*paths, f"{STAGING_DIR}/x", f"{BACKUP_DIR}/x"])
+    return f"""\
+_linked() {{
+  _p=""; _rest="$1"
+  while :; do
+    case "$_rest" in */*) _c=${{_rest%%/*}}; _rest=${{_rest#*/}} ;; *) return 1 ;; esac
+    _p="$_p${{_p:+/}}$_c"
+    if [ -L "$DIR/$_p" ]; then bad="$_p"; return 0; fi
+  done
+}}
+for _f in {listed}; do
+  if _linked "$_f"; then {fail}; fi
+done"""
+
+
 def build_preflight_script(
-    data_dir: str, profile: str, service: str | None, scope: ServiceScope
+    data_dir: str,
+    profile: str,
+    service: str | None,
+    scope: ServiceScope,
+    paths: Iterable[str] = (),
 ) -> str:
     """Deploy prerequisites: ``tar``, a sha256 tool, one filesystem, the unit's user.
 
@@ -304,6 +332,8 @@ def build_preflight_script(
     one filesystem, so the state folder must share a device with both managed
     trees. Prints ``PRE|<check>|ok`` or ``PRE|<check>|<problem>`` per check and
     ``USER|<unit user>`` (the unit's ``User=``, else the user running the script).
+    ``PRE|links|<b64 folder>`` names a symbolic link on the way to one of *paths*
+    (see :func:`no_links`).
     """
     user_probe = (
         f"u=$({_systemctl(scope, mutate=False)} show -p User --value {sh_quote(service)} "
@@ -315,6 +345,7 @@ def build_preflight_script(
 set +e
 {HELPERS}
 DIR={sh_quote(data_dir)}
+{no_links(paths, f'echo "PRE{SEP}links{SEP}$(b64s "$bad")"; break')}
 mkdir -p "$DIR/{STATE_DIR}"
 command -v tar >/dev/null 2>&1 && echo "PRE{SEP}tar{SEP}ok" || echo "PRE{SEP}tar{SEP}missing"
 if command -v sha256sum >/dev/null 2>&1 || command -v shasum >/dev/null 2>&1; then
@@ -341,13 +372,17 @@ def build_backup_script(data_dir: str, paths: Iterable[str], ts: str) -> str:
     data folder may hold the separator) or ``BACKUP|none`` when there is
     nothing to back up (first deploy).
     """
+    paths = list(paths)
     adds = "\n".join(
         f'[ -f "$DIR/"{sh_quote(p)} ] && printf "%s\\n" {sh_quote(p)} >> "$LIST"'
         for p in paths
     )
+    links = no_links(paths, f'echo "BACKUP{SEP}link{SEP}$(b64s "$bad")"; exit 1')
     return f"""\
 set -e
+{HELPERS}
 DIR={sh_quote(data_dir)}
+{links}
 BK="$DIR/{BACKUP_DIR}"
 mkdir -p "$BK"
 LIST=$(mktemp "$DIR/{STATE_DIR}/backup-list.XXXXXX")
@@ -407,6 +442,7 @@ def build_apply_script(
     nothing is written unless it still owns the lock (``APPLY|lost``).
     """
     guard = lock_guard(holder, "APPLY") if holder else ""
+    remove = list(remove)
     verify = "\n".join(
         f'f={sh_quote(rel)}; [ "$(sha "$STG/$f")" = {sh_quote(sha)} ] '
         f'|| {{ echo "APPLY{SEP}hashfail{SEP}$f"; exit 1; }}'
@@ -429,6 +465,7 @@ set -e
 {HELPERS}
 DIR={sh_quote(data_dir)}
 {guard}
+{no_links([*place, *remove], f'echo "APPLY{SEP}link{SEP}$(b64s "$bad")"; exit 1')}
 STG="$DIR/"{sh_quote(staging)}
 {verify}
 {interim}
@@ -517,6 +554,7 @@ while [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && [ "$i" -lt {int(wait_s)} ];
   sleep 1; i=$((i + 1))
 done
 if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then echo "RESTORE{SEP}busy"; exit 1; fi
+{no_links(paths, 'fail "a folder on the way is a symbolic link: $bad"')}
 T=$(mktemp -d "$DIR/{STATE_DIR}/restore.XXXXXX") || fail "cannot create a work folder"
 {unpack}
 bad=""

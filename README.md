@@ -54,7 +54,9 @@ mt5ctl treats a terminal like a deploy target:
 
 ## What a deploy touches
 
-Inside the terminal's data folder, and nowhere else:
+Inside the terminal's data folder, and nowhere else (a folder inside it that is
+a symbolic link to somewhere else stops the deploy before the terminal is
+stopped):
 
 | Path | What happens |
 |---|---|
@@ -68,8 +70,8 @@ unit — only when something actually changes.
 
 It never touches other profiles, templates, presets, indicators or libraries,
 `config/` (accounts, passwords, servers), Market Watch, history, the journal, or
-anything outside the data folder. It never logs in to an account and never
-handles credentials.
+anything outside the data folder. A deploy never logs in to an account and never
+handles credentials; only `login` does ([docs/deploy.md](docs/deploy.md#logging-in)).
 
 The other commands touch less: `adopt` writes only `.mt5ctl/deployed.json`;
 `restart` runs `systemctl restart`; `compile` works in a temporary

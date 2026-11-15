@@ -776,13 +776,24 @@ async def start(
 # --------------------------------------------------------------------------- #
 
 
-async def _preflight(host: Host, term: Terminal) -> str:
-    """Check deploy prerequisites; return the unit's user."""
+async def _preflight(host: Host, term: Terminal, paths: Iterable[str] = ()) -> str:
+    """Check deploy prerequisites (and that no folder on the way to *paths* is a
+    symbolic link); return the unit's user."""
     script = scripts.build_preflight_script(
-        term.data_dir, term.profile, term.service, term.service_scope
+        term.data_dir, term.profile, term.service, term.service_scope, paths
     )
     result = await transport.run(host, script, check=False)
-    problems = [f"{f[0]}: {f[1]}" for f in _lines(result.stdout, "PRE") if f[1:2] != ["ok"]]
+    problems = []
+    for f in _lines(result.stdout, "PRE"):
+        if f[1:2] == ["ok"]:
+            continue
+        if f[:1] == ["links"]:
+            folder = _unb64(f[1]).decode("utf-8", "replace") if len(f) > 1 else "?"
+            problems.append(
+                f"{folder} is a symbolic link: writing through it would leave the data folder"
+            )
+        else:
+            problems.append(f"{f[0]}: {f[1] if len(f) > 1 else '?'}")
     if problems:
         raise DeployError("deploy prerequisites not met on the host: " + "; ".join(problems))
     users = _lines(result.stdout, "USER")
@@ -911,7 +922,16 @@ async def deploy(
             )
             return DeployResult(terminal=term.id, plan=current, restarted=False, verify=report)
         try:
-            unit_user = await _preflight(host, term)
+            unit_user = await _preflight(
+                host,
+                term,
+                [
+                    *current.add,
+                    *current.update,
+                    *current.remove,
+                    order_relpath(bundle.profile),
+                ],
+            )
             # Counted as stopped before asking: a stop that reports an error (a
             # dropped connection, a slow ExecStop) may still complete on the host,
             # and starting a unit that is already running does nothing.
