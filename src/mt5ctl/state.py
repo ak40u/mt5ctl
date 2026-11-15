@@ -28,7 +28,6 @@ from pathlib import Path
 from .bundle import (
     chart_digest,
     charts_dir,
-    expert_relpath,
     file_digest,
     is_chart,
     order_relpath,
@@ -44,18 +43,28 @@ from .scripts import HELPERS, SEP, sh_quote
 def _chart_ref(chart: ChartFile) -> tuple[str | None, bool]:
     """``(expert relpath or None, unresolved?)`` for a live chart.
 
-    Unresolved means the chart runs an expert we cannot locate (empty or
-    escaping path), so it might be running any managed expert.
+    A live chart's path is read the way the terminal would follow it, not as
+    strictly as a bundle's: Wine finds files whatever their case, and a ``.``
+    component changes nothing. A path outside Experts (a Market product) is
+    resolved: it is simply not an expert mt5ctl manages. Unresolved means the
+    chart runs an expert we cannot place (an empty path, ``..``), so it might be
+    running any managed expert.
     """
     expert = chart.expert
     if expert is None:
         return None, False
     stored = expert.path.strip()
-    if not stored or ".." in stored.replace("\\", "/").split("/"):
+    parts = [p for p in stored.replace("\\", "/").split("/") if p and p != "."]
+    if not parts or ".." in parts:
         return None, True
-    # A path outside Experts (e.g. a Market product) is resolved: it is simply
-    # not an expert mt5ctl manages.
-    return expert_relpath(stored), False
+    if parts[0].lower() != "experts":
+        return None, False
+    if len(parts) < 2:
+        return None, True
+    rel = "/".join(["MQL5", "Experts", *parts[1:]])
+    if not rel.lower().endswith(".ex5"):
+        rel += ".ex5"
+    return rel, False
 
 
 def assemble_state(

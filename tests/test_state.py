@@ -169,3 +169,34 @@ def test_cut_off_state_output_is_refused() -> None:
     name = base64.b64encode(b"chart01.chr").decode()
     with pytest.raises(StateError, match="truncated"):
         parse_state_output(f"MANIFEST|MISSING\nCHART|{name}|\n", "Default", [])
+
+
+@pytest.mark.parametrize(
+    "ref",
+    [
+        r"Experts\.\Portfolio\Trend.ex5",
+        r"experts\portfolio\TREND.EX5",
+        r"Experts\\Portfolio\Trend",
+    ],
+)
+def test_foreign_chart_keeps_its_expert_however_the_path_is_written(ref: str) -> None:
+    """The terminal (Wine) finds these; a managed expert they run must stay."""
+    from mt5ctl.bundle import Bundle
+    from mt5ctl.manifest import Manifest
+    from mt5ctl.reconcile import compute_plan
+
+    st = assemble_state(
+        Manifest("Default", {EXPERT: "sha256:x"}).to_json(),
+        {CHART2: chart_bytes(expert_path=ref)},
+        {},
+        [],
+    )
+    bundle = Bundle(
+        root=Path(),
+        profile="Default",
+        files={"MQL5/Experts/Other.ex5": "sha256:y"},
+        chart_experts={},
+    )
+    plan = compute_plan(bundle, st)
+    assert EXPERT not in plan.remove
+    assert plan.keep == (EXPERT,)

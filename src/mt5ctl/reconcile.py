@@ -184,10 +184,12 @@ def compute_plan(bundle: Bundle, state: TerminalState) -> DeployPlan:
 
     remove: list[str] = []
     keep: list[str] = []
+    # Wine finds an expert whatever the case of its path: so must this check.
+    surviving = {ref.lower() for ref in surviving_refs}
     for path in sorted(p for p in managed if p not in bundle.files):
         if is_chart(path):
             remove.append(path)
-        elif path in surviving_refs or ambiguous:
+        elif path.lower() in surviving or ambiguous:
             keep.append(path)
         else:
             remove.append(path)
