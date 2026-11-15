@@ -8,8 +8,10 @@ under Wine (home folder renamed, host details removed).
 from __future__ import annotations
 
 from builders import CHARTS, FIXTURES
-from mt5ctl import mt5spec
+from mt5ctl import mt5spec, operations
 from mt5ctl.chart import ChartFile, Timeframe
+from mt5ctl.models import Env
+from mt5ctl.results import TerminalStatus
 from mt5ctl.text import TextFormat, decode, decode_lenient
 
 JOURNAL = decode_lenient((FIXTURES / "logs/journal.log").read_bytes())
@@ -124,3 +126,47 @@ def test_expert_log_name_matches_the_journal() -> None:
     name = mt5spec.expert_log_name(r"MQL5/Experts/Examples/MACD/MACD Sample.ex5")
     loaded = {m["name"] for m in mt5spec.LOG_EXPERT_LOADED_RE.finditer(JOURNAL)}
     assert name in loaded
+
+
+# -- broker journal (a real account logged in; login and server renamed) -- #
+
+
+INVESTOR = decode_lenient((FIXTURES / "logs/journal-investor.log").read_bytes())
+RECONNECT = decode_lenient((FIXTURES / "logs/journal-reconnect.log").read_bytes())
+
+
+def until(text: str, marker: str) -> str:
+    """The journal up to and including the first line containing *marker*."""
+    lines = text.splitlines()
+    end = next(i for i, ln in enumerate(lines) if marker in ln)
+    return "\n".join(lines[: end + 1])
+
+
+def test_authorization_lines() -> None:
+    assert len(mt5spec.LOG_AUTHORIZED_RE.findall(RECONNECT)) == 2  # login, then reconnect
+    assert operations.journal_connection(until(INVESTOR, "synchronized"))[0] is True
+
+
+def test_lost_connection_then_reconnect() -> None:
+    assert operations.journal_connection(until(RECONNECT, "lost"))[0] is False
+    state, event = operations.journal_connection(until(RECONNECT, "Access Server"))
+    assert state is True and event is not None and "Access Server" in event
+
+
+def test_normal_exit_logs_a_disconnect() -> None:
+    assert operations.journal_connection(RECONNECT)[0] is False
+
+
+def test_investor_mode_means_trading_disabled() -> None:
+    assert operations.journal_trading_disabled(until(INVESTOR, "authorized")) is None
+    assert operations.journal_trading_disabled(INVESTOR) == "investor mode"
+    st = TerminalStatus("t", "h", Env.DEMO, "active", connected=True)
+    report = operations.evaluate_verify(st, INVESTOR, {"MACD Sample"})
+    assert report.loaded == ("MACD Sample",)
+    assert not report.healthy
+    assert "TRADING DISABLED (investor mode)" in report.detail
+
+
+def test_level_column() -> None:
+    lost = next(ln for ln in RECONNECT.splitlines() if "lost" in ln)
+    assert lost.split("\t")[1] == "1"  # warning

@@ -26,12 +26,19 @@ class TerminalStatus:
     otherwise from the latest connect/disconnect line in the journal."""
     last_event: str | None = None
     """The latest connect or disconnect line of the journal."""
+    trading_disabled: str | None = None
+    """Why the account cannot trade (e.g. ``investor mode``), when the journal
+    says so after the latest authorization; ``None`` otherwise."""
     error: str | None = None
     """Set when the host could not be queried; the other fields are then empty."""
 
     @property
     def healthy(self) -> bool:
-        return self.service_state == "active" and self.connected is True
+        return (
+            self.service_state == "active"
+            and self.connected is True
+            and self.trading_disabled is None
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,11 +51,15 @@ class VerifyReport:
     loaded: tuple[str, ...] = ()
     pending: tuple[str, ...] = ()
     failed: tuple[str, ...] = ()
+    trading_disabled: str | None = None
+    """Why the account cannot trade, from the journal; ``None`` when it can."""
 
     @property
     def detail(self) -> str:
         conn = {True: "connected", False: "NOT connected", None: "connection unknown"}
         parts = [f"service {self.service_state}", conn[self.connected]]
+        if self.trading_disabled is not None:
+            parts.append(f"TRADING DISABLED ({self.trading_disabled})")
         total = len(self.loaded) + len(self.pending) + len(self.failed)
         if total:
             parts.append(f"{len(self.loaded)}/{total} experts loaded")

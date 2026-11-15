@@ -94,14 +94,25 @@ JOURNAL_DIR = "logs"
 JOURNAL_GLOB = "*.log"
 
 # Journal lines (matched case-insensitively, anywhere in the line).
-# Observed (build 6320): "Terminal  MetaTrader 5 x64 build 6320 started for ...",
-# "Experts  expert MACD Sample (EURUSD,H1) loaded successfully" and
-# "... removed". The broker authorization, disconnect and failed-load lines are
-# MT4 heritage; a terminal without an account logs none of them.
+# Observed (build 6320, with and without a broker account):
+#   Terminal  MetaTrader 5 x64 build 6320 started for MetaQuotes Ltd.
+#   Experts   expert MACD Sample (EURUSD,H1) loaded successfully   (and "... removed")
+#   Network   '<login>': authorized on <server>
+#   Network   '<login>': authorized on <server> through Access Server ... (ping: ...)
+#   Network   '<login>': connection to <server> lost
+#   Network   '<login>': disconnected from <server>      (on a normal exit)
+#   Network   '<login>': trading has been disabled - investor mode
+# The second column is the level: 0 information, 1 warning, 2 error.
+# The failed-load line is MT4 heritage and has not been observed.
 LOG_TERMINAL_STARTED_RE = re.compile(r"MetaTrader 5 .*build \d+ started", re.IGNORECASE)
 LOG_AUTHORIZED_RE = re.compile(r"authorized on (\S+)", re.IGNORECASE)
 LOG_CONNECTION_LOST_RE = re.compile(
-    r"connection to .* lost|no connection|disconnected", re.IGNORECASE
+    r"connection to .* lost|no connection|disconnected from", re.IGNORECASE
+)
+# The account cannot trade (investor password, or trading disabled by the
+# broker); experts load but every order is refused. The reason follows the dash.
+LOG_TRADING_DISABLED_RE = re.compile(
+    r"trading has been disabled(?:\s*-\s*(?P<reason>.+))?", re.IGNORECASE
 )
 LOG_EXPERT_LOADED_RE = re.compile(
     r"expert (?P<name>.+?) \((?P<symbol>[^,()]+),(?P<period>[^)]+)\) loaded successfully",

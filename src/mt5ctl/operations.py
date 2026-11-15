@@ -156,9 +156,26 @@ def journal_connection(text: str) -> tuple[bool | None, str | None]:
     return state, event
 
 
+def journal_trading_disabled(text: str) -> str | None:
+    """Why the account cannot trade, if the journal says so after the latest login.
+
+    Each authorization starts afresh; a "trading has been disabled" line after
+    it wins. Returns the reason (``investor mode``), or ``"disabled"`` when the
+    line gives none.
+    """
+    reason: str | None = None
+    for line in text.splitlines():
+        if mt5spec.LOG_AUTHORIZED_RE.search(line):
+            reason = None
+        elif (match := mt5spec.LOG_TRADING_DISABLED_RE.search(line)) is not None:
+            reason = (match["reason"] or "disabled").strip()
+    return reason
+
+
 def _parse_status_line(fields: list[str], term: Terminal, host: Host) -> TerminalStatus:
     _tid, state, active, age, estab, tail = (fields + [""] * 6)[:6]
-    journal_state, event = journal_connection(decode_lenient(_unb64(tail)))
+    journal = decode_lenient(_unb64(tail))
+    journal_state, event = journal_connection(journal)
     sockets = _int_or_none(estab)
     connected = (sockets > 0) if sockets is not None else journal_state
     return TerminalStatus(
@@ -170,6 +187,7 @@ def _parse_status_line(fields: list[str], term: Terminal, host: Host) -> Termina
         journal_age_seconds=_int_or_none(age),
         connected=connected,
         last_event=event,
+        trading_disabled=journal_trading_disabled(journal),
     )
 
 
@@ -288,8 +306,13 @@ def evaluate_verify(st: TerminalStatus, journal: str, expected: set[str]) -> Ver
     )
     failed = sorted(n for n in expected if n.lower() in failed_names)
     pending = sorted(n for n in expected if n not in ok_names and n not in failed)
+    trading_disabled = journal_trading_disabled(journal) or st.trading_disabled
     healthy = (
-        st.service_state == "active" and connected is not False and not failed and not pending
+        st.service_state == "active"
+        and connected is not False
+        and trading_disabled is None
+        and not failed
+        and not pending
     )
     return VerifyReport(
         healthy=healthy,
@@ -298,6 +321,7 @@ def evaluate_verify(st: TerminalStatus, journal: str, expected: set[str]) -> Ver
         loaded=tuple(ok_names),
         pending=tuple(pending),
         failed=tuple(failed),
+        trading_disabled=trading_disabled,
     )
 
 

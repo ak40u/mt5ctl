@@ -223,3 +223,15 @@ def test_duration(seconds: int, text: str) -> None:
     from mt5ctl.formatting import duration
 
     assert duration(seconds) == text
+
+
+def test_status_line_flags_trading_disabled() -> None:
+    from mt5ctl.formatting import status_lines
+    from mt5ctl.models import Env
+    from mt5ctl.results import TerminalStatus
+
+    st = TerminalStatus(
+        "demo1", "h", Env.DEMO, "active", connected=True, trading_disabled="investor mode"
+    )
+    assert not st.healthy
+    assert status_lines([st])[0].endswith("TRADING DISABLED (investor mode)")
