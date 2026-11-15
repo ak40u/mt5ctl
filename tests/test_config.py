@@ -93,6 +93,12 @@ def test_unknown_terminal_lists_known() -> None:
             "service_scope",
         ),
         ({"h": {}}, {"t": {"host": "h", "data_dir": "/d", "display": "99"}}, "display"),
+        (
+            {"h": {}},
+            {"t": {"host": "h", "data_dir": "/d", "service": "u", "start_command": "x"}},
+            "not both",
+        ),
+        ({"h": {}}, {"t": {"host": "h", "data_dir": "/d", "start_command": "x"}}, "together"),
     ],
 )
 def test_invalid_registries(

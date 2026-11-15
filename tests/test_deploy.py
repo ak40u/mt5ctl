@@ -705,3 +705,16 @@ def test_verify_stops_waiting_when_the_outcome_is_settled(farm: Farm, tmp_path: 
     assert _time.monotonic() - began < 15
     assert result.verify is not None and result.verify.trading_disabled == "investor mode"
     assert not result.verify.healthy
+
+
+def test_status_of_a_stopped_terminal_ignores_its_old_journal(
+    farm: Farm, tmp_path: Path
+) -> None:
+    farm.journal_on_start("Trend")
+    with (farm.systemd / "journal.bin").open("ab") as fh:
+        line = "0\t12:00:03.000\tNetwork\t'1': trading has been disabled - investor mode\r\n"
+        fh.write(line.encode("utf-16-le"))
+    deploy(farm, bundle_v1(tmp_path / "v1"))
+    farm.set_state("inactive")
+    (st,) = asyncio.run(operations.status(farm.registry))
+    assert (st.connected, st.trading_disabled, st.algo_trading) == (None, None, None)

@@ -59,6 +59,8 @@ SEP = scripts.SEP
 # Drain must outlast the unit's own stop timeout plus a slow Wine teardown.
 DRAIN_TIMEOUT_S = 90
 CONTROL_TIMEOUT_S = 180.0
+# process mode: how long the stop waits for the terminal after stop_command.
+PROCESS_STOP_WAIT_S = 50
 # A terminal needs up to a minute or two to reconnect and load a large set of
 # experts; verify polls instead of judging one snapshot.
 VERIFY_TIMEOUT_S = 180.0
@@ -86,13 +88,12 @@ def _require_live_confirmation(term: Terminal, action: str, confirm: bool) -> No
         raise ConfirmationRequiredError(term.id, action)
 
 
-def _require_service(term: Terminal, action: str) -> str:
-    if not term.service:
+def _require_supervisor(term: Terminal, action: str) -> None:
+    if not term.supervised:
         raise DeployError(
-            f"{action} needs the terminal's systemd unit; set 'service' for "
-            f"{term.id!r} in the registry"
+            f"{action} needs to know how {term.id!r} is run: set 'service' (a systemd "
+            "unit) or 'start_command' and 'stop_command' in the registry"
         )
-    return term.service
 
 
 # --------------------------------------------------------------------------- #
@@ -199,6 +200,10 @@ def _parse_status_line(fields: list[str], term: Terminal, host: Host) -> Termina
     session = since_latest_start(journal)
     sockets = _int_or_none(estab)
     connected = (sockets > 0) if sockets is not None else journal_state
+    running = state == "active"
+    if not running:
+        # A stopped terminal's journal describes its last session, not now.
+        connected = None
     return TerminalStatus(
         terminal=term.id,
         host=host.id,
@@ -208,14 +213,23 @@ def _parse_status_line(fields: list[str], term: Terminal, host: Host) -> Termina
         journal_age_seconds=_int_or_none(age),
         connected=connected,
         last_event=event,
-        trading_disabled=journal_trading_disabled(journal),
+        trading_disabled=journal_trading_disabled(journal) if running else None,
         terminal_running=None if process_count is None else process_count > 0,
-        algo_trading=journal_algo_trading(session),
+        algo_trading=journal_algo_trading(session) if running else None,
     )
 
 
 async def _status_for_host(host: Host, terms: list[Terminal]) -> list[TerminalStatus]:
-    specs = [(t.id, t.service or "", t.service_scope, t.data_dir) for t in terms]
+    specs = [
+        (
+            t.id,
+            t.service or "",
+            t.service_scope,
+            t.data_dir,
+            "systemd" if t.service else "process",
+        )
+        for t in terms
+    ]
     try:
         result = await transport.run(
             host, scripts.build_status_script(specs, JOURNAL_TAIL_BYTES), timeout=60.0
@@ -468,13 +482,25 @@ async def verify(
 # --------------------------------------------------------------------------- #
 
 
+def _process_script(term: Terminal, action: str) -> str:
+    assert term.start_command is not None and term.stop_command is not None
+    return scripts.build_process_script(
+        term.data_dir, action, term.start_command, term.stop_command, PROCESS_STOP_WAIT_S
+    )
+
+
 async def _control(host: Host, term: Terminal, action: str) -> None:
-    service = _require_service(term, action)
-    script = scripts.build_control_script(service, term.service_scope, action)
+    _require_supervisor(term, action)
+    if term.service:
+        script = scripts.build_control_script(term.service, term.service_scope, action)
+        what = f"systemctl {action} {term.service}"
+    else:
+        script = _process_script(term, action)
+        what = f"{action} of {term.id} (start_command / stop_command)"
     result = await transport.run(host, script, check=False, timeout=CONTROL_TIMEOUT_S)
     if not result.ok:
         raise DeployError(
-            f"systemctl {action} {service} failed (exit {result.returncode}): "
+            f"{what} failed (exit {result.returncode}): "
             f"{result.stderr.strip() or result.stdout.strip()}"
         )
 
@@ -485,8 +511,8 @@ async def _drain(host: Host, term: Terminal) -> str:
     ``success`` means the terminal closed itself (and saved its profile);
     anything else means systemd had to end it.
     """
-    service = _require_service(term, "stop")
-    script = scripts.build_drain_script(service, term.service_scope, DRAIN_TIMEOUT_S)
+    assert term.service is not None
+    script = scripts.build_drain_script(term.service, term.service_scope, DRAIN_TIMEOUT_S)
     result = await transport.run(host, script, check=False, timeout=DRAIN_TIMEOUT_S + 30)
     for fields in _lines(result.stdout, "DRAIN"):
         if fields[:1] == ["ok"]:
@@ -560,7 +586,7 @@ async def restart(
     term = registry.terminal(terminal_id)
     host = registry.host_of(term)
     _require_live_confirmation(term, "restart", confirm)
-    _require_service(term, "restart")
+    _require_supervisor(term, "restart")
     timeout = _verify_window(verify_timeout, VERIFY_TIMEOUT_S)
     async with _locked(host, term):
         expected = await _live_experts(registry, term)
@@ -585,15 +611,27 @@ async def _stop_and_drain(host: Host, term: Terminal) -> StopResult:
     Whether the terminal closed itself is read from its own journal: the exit
     line it writes on the way out (see :data:`mt5spec.LOG_TERMINAL_EXIT_RE`).
     """
-    service = _require_service(term, "stop")
-    probe = await transport.run(
-        host, scripts.build_is_active_script(service, term.service_scope), check=False
-    )
-    states = _lines(probe.stdout, "ACTIVE")
-    was_running = not states or (states[0][:1] != ["inactive"] and states[0][:1] != ["failed"])
+    _require_supervisor(term, "stop")
     cursor = await _journal_cursor(host, term)
-    await _control(host, term, "stop")
-    unit_result = await _drain(host, term)
+    if term.service:
+        probe = await transport.run(
+            host, scripts.build_is_active_script(term.service, term.service_scope), check=False
+        )
+        states = _lines(probe.stdout, "ACTIVE")
+        was_running = not states or states[0][:1] not in (["inactive"], ["failed"])
+        await _control(host, term, "stop")
+        unit_result = await _drain(host, term)
+    else:
+        # The process-mode stop script itself asks, waits and, if need be, ends the group.
+        result = await transport.run(
+            host,
+            _process_script(term, "stop"),
+            check=False,
+            timeout=PROCESS_STOP_WAIT_S + 60,
+        )
+        was_running = _lines(result.stdout, "WAS")[:1] != [["0"]]
+        results = _lines(result.stdout, "RESULT")
+        unit_result = results[0][0] if results and results[0] else "unknown"
     if not was_running:
         return StopResult(terminal=term.id, unit_result=unit_result, was_running=False)
     exit_code: int | None = None
@@ -611,7 +649,7 @@ async def stop(registry: Registry, terminal_id: str, *, confirm: bool = False) -
     term = registry.terminal(terminal_id)
     host = registry.host_of(term)
     _require_live_confirmation(term, "stop", confirm)
-    _require_service(term, "stop")
+    _require_supervisor(term, "stop")
     async with _locked(host, term):
         with anyio.CancelScope(shield=True):
             result = await _stop_and_drain(host, term)
@@ -629,7 +667,7 @@ async def start(
     term = registry.terminal(terminal_id)
     host = registry.host_of(term)
     _require_live_confirmation(term, "start", confirm)
-    _require_service(term, "start")
+    _require_supervisor(term, "start")
     timeout = _verify_window(verify_timeout, VERIFY_TIMEOUT_S)
     async with _locked(host, term):
         expected = await _live_experts(registry, term)
@@ -759,7 +797,7 @@ async def deploy(
     term = registry.terminal(terminal_id)
     host = registry.host_of(term)
     _require_live_confirmation(term, "deploy to", confirm)
-    _require_service(term, "deploy")
+    _require_supervisor(term, "deploy")
     bundle = read_bundle(bundle_dir, profile=term.profile)
     timeout = _verify_window(verify_timeout, VERIFY_TIMEOUT_S)
     interval = VERIFY_INTERVAL_S if verify_interval is None else verify_interval

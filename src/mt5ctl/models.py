@@ -75,7 +75,8 @@ class Terminal:
     """Chart profile mt5ctl manages (``MQL5/Profiles/Charts/<profile>``)."""
     env: Env = Env.DEMO
     service: str | None = None
-    """systemd unit running the terminal; required by deploy, status and restart."""
+    """systemd unit running the terminal. Either this or :attr:`start_command`
+    is needed by deploy, start, stop, restart and status."""
     service_scope: ServiceScope = ServiceScope.SYSTEM
     wine: str = "wine"
     """Wine to run MetaEditor with (compile); a path when the terminal uses its own
@@ -84,6 +85,16 @@ class Terminal:
     """``WINEPREFIX`` for running MetaEditor (compile); Wine's default when unset."""
     display: str | None = None
     """X display for MetaEditor under Wine, e.g. ``:99``."""
+    start_command: str | None = None
+    """Without systemd: the shell command that runs the terminal, started by
+    mt5ctl in the data folder as a background process group (``process`` mode)."""
+    stop_command: str | None = None
+    """``process`` mode: the shell command that asks the terminal to close; it
+    gets ``$MAINPID``. mt5ctl then waits, and ends the group if it lingers."""
+
+    @property
+    def supervised(self) -> bool:
+        return bool(self.service or self.start_command)
 
 
 @dataclass(frozen=True, slots=True)

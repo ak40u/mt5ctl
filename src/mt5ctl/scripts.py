@@ -110,6 +110,69 @@ exit $rc
 """
 
 
+PROCESS_PID = f"{STATE_DIR}/terminal.pid"
+PROCESS_OUT = f"{STATE_DIR}/terminal.out"
+
+
+def build_process_script(
+    data_dir: str, action: str, start_command: str, stop_command: str, timeout_s: int
+) -> str:
+    """Start, stop or restart a terminal without systemd (``process`` mode).
+
+    ``start`` runs *start_command* in the data folder as a background process
+    group (``set -m``), its pid in ``.mt5ctl/terminal.pid``, output in
+    ``.mt5ctl/terminal.out``. ``stop`` runs *stop_command* with ``$MAINPID``
+    set, waits up to *timeout_s* for the group to exit, then sends TERM and,
+    after 10 s, KILL. Prints ``WAS|<0|1>``, ``STATE|<active|inactive|failed>|<rc>``
+    and, for a stop, ``RESULT|<success|timeout>``.
+    """
+    if action not in CONTROL_ACTIONS:
+        raise ValueError(f"action must be one of {CONTROL_ACTIONS}, got {action!r}")
+    return f"""\
+set +e
+DIR={sh_quote(data_dir)}
+PIDF="$DIR/{PROCESS_PID}"
+OUT="$DIR/{PROCESS_OUT}"
+alive() {{ [ -f "$PIDF" ] && kill -0 "$(cat "$PIDF")" 2>/dev/null; }}
+group_alive() {{ kill -0 -- "-$1" 2>/dev/null; }}
+do_stop() {{
+  if ! alive; then echo "WAS{SEP}0"; rm -f "$PIDF"; echo "RESULT{SEP}success"; return 0; fi
+  echo "WAS{SEP}1"
+  pid=$(cat "$PIDF")
+  (cd "$DIR" && MAINPID=$pid sh -c {sh_quote(stop_command)}) >>"$OUT" 2>&1
+  i=0
+  while group_alive "$pid" && [ "$i" -lt {int(timeout_s)} ]; do sleep 1; i=$((i + 1)); done
+  r=success
+  if group_alive "$pid"; then
+    r=timeout
+    kill -TERM -- "-$pid" 2>/dev/null
+    i=0; while group_alive "$pid" && [ "$i" -lt 10 ]; do sleep 1; i=$((i + 1)); done
+    kill -KILL -- "-$pid" 2>/dev/null
+  fi
+  rm -f "$PIDF"
+  echo "RESULT{SEP}$r"
+}}
+do_start() {{
+  if alive; then echo "WAS{SEP}1"; echo "STATE{SEP}active{SEP}0"; return 0; fi
+  echo "WAS{SEP}0"
+  mkdir -p "$DIR/{STATE_DIR}"
+  cd "$DIR" || {{ echo "STATE{SEP}failed{SEP}1"; return 1; }}
+  set -m
+  nohup sh -c {sh_quote(start_command)} >>"$OUT" 2>&1 </dev/null &
+  echo $! > "$PIDF"
+  set +m
+  sleep 1
+  if alive; then echo "STATE{SEP}active{SEP}0"; return 0; fi
+  echo "STATE{SEP}failed{SEP}1"; return 1
+}}
+case {sh_quote(action)} in
+  start) do_start; exit $? ;;
+  stop) do_stop; echo "STATE{SEP}inactive{SEP}0"; exit 0 ;;
+  restart) do_stop >/dev/null; do_start; exit $? ;;
+esac
+"""
+
+
 def build_is_active_script(service: str, scope: ServiceScope) -> str:
     """Print ``ACTIVE|<state>`` for a unit (``systemctl is-active``)."""
     return f"""\
@@ -427,11 +490,12 @@ done
 
 
 def build_status_script(
-    specs: Iterable[tuple[str, str, ServiceScope, str]], tail_bytes: int
+    specs: Iterable[tuple[str, str, ServiceScope, str, str]], tail_bytes: int
 ) -> str:
     """Report several terminals on one host in one round trip.
 
-    Each spec is ``(terminal id, unit, scope, data dir)``. One line per terminal::
+    Each spec is ``(terminal id, unit, scope, data dir, mode)``, mode being
+    ``systemd`` or ``process``. One line per terminal::
 
         TERM|<id>|<state>|<active s|-1>|<journal age s|-1>|<estab|-1>|<b64 journal tail>|<procs|-1>
 
@@ -445,8 +509,8 @@ def build_status_script(
     """
     calls = "\n".join(
         f"emit {sh_quote(tid)} {sh_quote(unit)} {sh_quote(_systemctl(scope, mutate=False))} "
-        f"{sh_quote(scope.value)} {sh_quote(data_dir)}"
-        for tid, unit, scope, data_dir in specs
+        f"{sh_quote(scope.value)} {sh_quote(data_dir)} {sh_quote(mode)}"
+        for tid, unit, scope, data_dir, mode in specs
     )
     return f"""\
 set +e
@@ -459,32 +523,46 @@ CURUSER=$(id -un)
 HAVE_SS=0; command -v ss >/dev/null 2>&1 && HAVE_SS=1
 SS=$(ss -tnpH state established 2>/dev/null)
 emit() {{
-  id="$1"; svc="$2"; ctl="$3"; scope="$4"; dir="$5"
-  st=$($ctl is-active "$svc" 2>/dev/null); st=${{st:-unknown}}
-  aem=$($ctl show -p ActiveEnterTimestampMonotonic --value "$svc" 2>/dev/null)
-  active=-1
-  if [ -n "$UP" ] && [ -n "$aem" ] && [ "$aem" -gt 0 ] 2>/dev/null; then
-    active=$(awk -v u="$UP" -v a="$aem" 'BEGIN {{ d = u - a / 1000000; if (d < 0) d = 0; printf "%d", d }}')
+  id="$1"; svc="$2"; ctl="$3"; scope="$4"; dir="$5"; mode="$6"
+  active=-1; attrib=0; members=""; members_known=0
+  if [ "$mode" = process ]; then
+    # No systemd: the pid file mt5ctl wrote when it started the process group.
+    pid=$(cat "$dir/{PROCESS_PID}" 2>/dev/null)
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then st=active; else st=inactive; fi
+    if [ "$st" = active ]; then
+      a=$(ps -o etimes= -p "$pid" 2>/dev/null | tr -d ' ')
+      [ -n "$a" ] && active=$a
+      members=$(pgrep -g "$pid" 2>/dev/null); members_known=1
+    fi
+    attrib=1   # started by this user
+  else
+    st=$($ctl is-active "$svc" 2>/dev/null); st=${{st:-unknown}}
+    aem=$($ctl show -p ActiveEnterTimestampMonotonic --value "$svc" 2>/dev/null)
+    if [ -n "$UP" ] && [ -n "$aem" ] && [ "$aem" -gt 0 ] 2>/dev/null; then
+      active=$(awk -v u="$UP" -v a="$aem" 'BEGIN {{ d = u - a / 1000000; if (d < 0) d = 0; printf "%d", d }}')
+    fi
+    # ss shows the owning process of a socket only to root and to the socket's
+    # own user; anyone else would see "no connections" and report a false down.
+    unituser=$($ctl show -p User --value "$svc" 2>/dev/null)
+    if [ "$CURUID" = 0 ] || [ "$scope" = user ]; then attrib=1
+    elif [ -n "$unituser" ] && [ "$unituser" = "$CURUSER" ]; then attrib=1
+    fi
+    cg=$($ctl show -p ControlGroup --value "$svc" 2>/dev/null)
+    if [ -n "$cg" ] && [ -r "/sys/fs/cgroup$cg/cgroup.procs" ]; then
+      members=$(cat "/sys/fs/cgroup$cg/cgroup.procs"); members_known=1
+    fi
   fi
   log=$(ls -1 "$dir"/{_JOURNAL} 2>/dev/null | sort | tail -1)
   age=-1; tail=""
   if [ -n "$log" ]; then
     age=$((NOW - $(fmtime "$log"))); tail=$(tail -c {int(tail_bytes)} "$log" | base64 | tr -d '\\n')
   fi
-  # ss shows the owning process of a socket only to root and to the socket's
-  # own user; anyone else would see "no connections" and report a false down.
-  unituser=$($ctl show -p User --value "$svc" 2>/dev/null)
-  attrib=0
-  if [ "$CURUID" = 0 ] || [ "$scope" = user ]; then attrib=1
-  elif [ -n "$unituser" ] && [ "$unituser" = "$CURUSER" ]; then attrib=1
-  fi
   estab=-1
   procs=-1
-  cg=$($ctl show -p ControlGroup --value "$svc" 2>/dev/null)
   pids=""
-  if [ -n "$cg" ] && [ -r "/sys/fs/cgroup$cg/cgroup.procs" ]; then
+  if [ "$members_known" = 1 ] && [ -d /proc/self ]; then
     procs=0
-    for p in $(cat "/sys/fs/cgroup$cg/cgroup.procs"); do
+    for p in $members; do
       if is_terminal_main "$p"; then pids="$pids $p"; procs=$((procs + 1)); fi
     done
   fi

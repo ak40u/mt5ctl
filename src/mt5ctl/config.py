@@ -144,6 +144,14 @@ def _build_terminal(term_id: str, raw: dict[str, Any], hosts: dict[str, Host]) -
         raise ConfigError(f"{where}: display {display!r} must look like ':99'")
     wineprefix = raw.get("wineprefix")
     wine = str(raw.get("wine", "wine"))
+    start_command = raw.get("start_command")
+    stop_command = raw.get("stop_command")
+    if start_command is not None and service is not None:
+        raise ConfigError(
+            f"{where}: set either 'service' (systemd) or 'start_command', not both"
+        )
+    if (start_command is None) != (stop_command is None):
+        raise ConfigError(f"{where}: 'start_command' and 'stop_command' go together")
     return Terminal(
         id=term_id,
         host=host_id,
@@ -153,6 +161,12 @@ def _build_terminal(term_id: str, raw: dict[str, Any], hosts: dict[str, Host]) -
         service=str(service) if service is not None else None,
         service_scope=scope,
         wine=_plain(wine, "wine", where),
+        start_command=_plain(str(start_command), "start_command", where)
+        if start_command is not None
+        else None,
+        stop_command=_plain(str(stop_command), "stop_command", where)
+        if stop_command is not None
+        else None,
         wineprefix=_plain(str(wineprefix), "wineprefix", where) if wineprefix else None,
         display=str(display) if display is not None else None,
     )

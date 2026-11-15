@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# A terminal stand-in for process mode (no systemd). Run in the data folder:
+# logs its start and login (and an expert per name in $FAKE_EXPERTS) to the
+# journal in UTF-16LE, waits until .close appears (the stop command), then logs
+# its exit. With .hang present it ignores the close request.
+# Look like the real thing in /proc: Wine runs it with argv[0] terminal64.exe.
+if [ -z "${FAKE_TERMINAL_REEXEC:-}" ]; then
+  FAKE_TERMINAL_REEXEC=1 exec -a terminal64.exe bash "$0" "$@"
+fi
+L=logs/20261115.log
+mkdir -p logs
+w() { printf '%s\r\n' "$1" | iconv -f UTF-8 -t UTF-16LE >> "$L"; }
+w "$(printf '0\t12:00:00.000\tTerminal\tMetaTrader 5 x64 build 6320 started for MetaQuotes')"
+w "$(printf "0\t12:00:01.000\tNetwork\t'1': authorized on Broker-Demo")"
+for e in ${FAKE_EXPERTS:-}; do
+  w "$(printf '0\t12:00:02.000\tExperts\texpert %s (EURUSD,H4) loaded successfully' "$e")"
+done
+while [ ! -f .close ]; do sleep 0.2; done
+rm -f .close
+[ -f .hang ] && exec sleep 300
+w "$(printf '0\t12:00:09.000\tTerminal\texit with code 0')"
