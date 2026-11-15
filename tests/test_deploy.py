@@ -663,6 +663,7 @@ def test_unclean_stop_is_reported(farm: Farm, tmp_path: Path) -> None:
     result = asyncio.run(operations.stop(farm.registry, "demo1"))
     assert not result.clean and result.exit_code is None
     assert result.unit_result == "timeout"
+    farm.set_state("active")
     farm.journal_on_start("Trend")
     deployed = deploy(farm, bundle_v1(tmp_path / "v1"))
     assert deployed.stopped_cleanly is False
@@ -676,3 +677,14 @@ def test_clean_deploy_stop(farm: Farm, tmp_path: Path) -> None:
     deployed = deploy(farm, bundle_v1(tmp_path / "v1"))
     assert deployed.stopped_cleanly is True
     assert deployed.stop is not None and deployed.stop.exit_code == 0
+
+
+def test_stopping_a_stopped_terminal_is_clean(farm: Farm, tmp_path: Path) -> None:
+    farm.set_state("inactive")
+    farm.flag("killed")  # it writes no exit line: it was not running
+    result = asyncio.run(operations.stop(farm.registry, "demo1"))
+    assert not result.was_running and result.clean
+    farm.set_state("inactive")
+    farm.journal_on_start("Trend")
+    deployed = deploy(farm, bundle_v1(tmp_path / "v1"))
+    assert deployed.stopped_cleanly is True

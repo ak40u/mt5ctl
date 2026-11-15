@@ -103,11 +103,13 @@ class StopResult:
     exit_code: int | None = None
     """The code in the terminal's own "exit with code N" journal line; ``None``
     when it wrote none, i.e. it did not close itself and systemd ended it."""
+    was_running: bool = True
+    """``False`` when the unit was already stopped: there was nothing to save."""
 
     @property
     def clean(self) -> bool:
         """Whether the terminal closed itself, saving its profile on the way out."""
-        return self.exit_code is not None
+        return not self.was_running or self.exit_code is not None
 
 
 @dataclass(frozen=True, slots=True)

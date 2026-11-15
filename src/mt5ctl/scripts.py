@@ -106,6 +106,15 @@ exit $rc
 """
 
 
+def build_is_active_script(service: str, scope: ServiceScope) -> str:
+    """Print ``ACTIVE|<state>`` for a unit (``systemctl is-active``)."""
+    return f"""\
+set +e
+st=$({_systemctl(scope, mutate=False)} is-active {sh_quote(service)} 2>/dev/null)
+echo "ACTIVE{SEP}${{st:-unknown}}"
+"""
+
+
 def build_drain_script(service: str, scope: ServiceScope, timeout_s: int) -> str:
     """Wait until the unit is down and no terminal process is left in its cgroup.
 

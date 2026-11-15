@@ -167,6 +167,8 @@ def restart_lines(result: RestartResult, verb: str = "restarted") -> list[str]:
 
 
 def stop_lines(result: StopResult) -> list[str]:
+    if not result.was_running:
+        return [f"{result.terminal} was not running"]
     if result.clean:
         return [
             f"stopped {result.terminal} (the terminal exited with code {result.exit_code})"

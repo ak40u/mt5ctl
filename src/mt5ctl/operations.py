@@ -538,9 +538,17 @@ async def _stop_and_drain(host: Host, term: Terminal) -> StopResult:
     Whether the terminal closed itself is read from its own journal: the exit
     line it writes on the way out (see :data:`mt5spec.LOG_TERMINAL_EXIT_RE`).
     """
+    service = _require_service(term, "stop")
+    probe = await transport.run(
+        host, scripts.build_is_active_script(service, term.service_scope), check=False
+    )
+    states = _lines(probe.stdout, "ACTIVE")
+    was_running = not states or (states[0][:1] != ["inactive"] and states[0][:1] != ["failed"])
     cursor = await _journal_cursor(host, term)
     await _control(host, term, "stop")
     unit_result = await _drain(host, term)
+    if not was_running:
+        return StopResult(terminal=term.id, unit_result=unit_result, was_running=False)
     exit_code: int | None = None
     try:
         journal = await _journal_since(host, term, cursor)
