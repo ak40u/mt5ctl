@@ -30,7 +30,7 @@ Read-only. Nothing on the host is changed.
 
 | CLI | MCP tool | What it does |
 |---|---|---|
-| `deploy <terminal> <bundle>` | `mt5_deploy(terminal, bundle, confirm, verify_timeout)` | lock, stop and wait for the exit, plan again, back up, upload with checksums, apply, start, verify; restores the backup when the apply fails ([deploy.md](deploy.md#the-deploy-sequence)) |
+| `deploy <terminal> <bundle> [--start]` | `mt5_deploy(terminal, bundle, confirm, verify_timeout, start)` | lock, stop and wait for the exit, plan again, back up, upload with checksums, apply, start, verify; restores the backup when the apply fails ([deploy.md](deploy.md#the-deploy-sequence)). A terminal that was stopped stays stopped unless `--start` |
 | `adopt <terminal> <bundle>` | `mt5_adopt(terminal, bundle, confirm)` | record a bundle the terminal already runs as managed, without touching it |
 | `start` / `stop` / `restart <terminal>` | `mt5_start`, `mt5_stop`, `mt5_restart` | through systemd, or the terminal's own commands in process mode; `stop` reports whether the terminal closed itself; `start` and `restart` verify |
 | `login <terminal> --server S [--account N] --password-stdin` | `mt5_login(terminal, server, account, password, confirm, verify_timeout)` | one headless login; the terminal keeps the password and logs in by itself afterwards ([deploy.md](deploy.md#logging-in)). The password is never in a command line, a log or the output |
