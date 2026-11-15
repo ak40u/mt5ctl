@@ -184,11 +184,20 @@ class Bundle:
         return sorted(p for p in self.files if not is_chart(p))
 
 
-def _discover_profile(root: Path) -> str:
+def _profiles_in(root: Path) -> list[str]:
+    """Profile folders of the bundle that hold any file."""
     charts_root = root / CHARTS_ROOT
     if not charts_root.is_dir():
-        return DEFAULT_PROFILE
-    found = sorted(p.name for p in charts_root.iterdir() if p.is_dir())
+        return []
+    return sorted(
+        p.name
+        for p in charts_root.iterdir()
+        if p.is_dir() and any(f.is_file() for f in p.rglob("*"))
+    )
+
+
+def _discover_profile(root: Path) -> str:
+    found = _profiles_in(root)
     if len(found) == 1:
         return found[0]
     if not found:
@@ -211,6 +220,14 @@ def read_bundle(path: str | Path, profile: str | None = None) -> Bundle:
     if not root.is_dir():
         raise BundleError(f"bundle directory not found: {str(path)!r}")
     chosen = validate_profile(profile) if profile is not None else _discover_profile(root)
+    others = [p for p in _profiles_in(root) if p != chosen]
+    if others:
+        # Filtering them out would read as a bundle without charts: the plan
+        # would remove every managed chart.
+        raise BundleError(
+            f"the bundle holds charts for profile {', '.join(repr(p) for p in others)}, but "
+            f"the terminal runs profile {chosen!r}; build the bundle for {chosen!r}"
+        )
 
     files: dict[str, str] = {}
     chart_experts: dict[str, str] = {}

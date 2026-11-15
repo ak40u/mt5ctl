@@ -100,8 +100,9 @@ def test_profile_discovery_and_selection(tmp_path: Path) -> None:
     write_tree(root, charts={"chart01.chr": chart_bytes()}, profile="Other")
     with pytest.raises(BundleError, match="several profiles"):
         read_bundle(root)
-    chosen = read_bundle(root, profile="Other")
-    assert chosen.charts == ["MQL5/Profiles/Charts/Other/chart01.chr"]
+    # naming one does not drop the other's charts in silence
+    with pytest.raises(BundleError, match="profile 'Portfolio A'"):
+        read_bundle(root, profile="Other")
 
 
 def test_bundle_with_only_experts_defaults_to_default_profile(tmp_path: Path) -> None:
@@ -188,3 +189,22 @@ def test_digest_dispatches_on_file_kind() -> None:
     assert digest(CHART1, chart_bytes()) == digest(CHART1, chart_bytes(scroll=0))
     assert digest(EXPERT, b"a") != digest(EXPERT, b"b")
     assert digest(EXPERT, b"a").startswith("sha256:")
+
+
+def test_bundle_for_another_profile_is_refused_not_emptied(tmp_path: Path) -> None:
+    """Read for the terminal's profile, its charts must not silently vanish:
+    a bundle without charts plans the removal of every managed chart."""
+    root = write_tree(
+        tmp_path / "b",
+        charts={"chart01.chr": chart_bytes()},
+        experts={EXPERT: b"x"},
+        profile="Other",
+    )
+    with pytest.raises(BundleError, match=r"profile 'Other'.*runs profile 'Default'"):
+        read_bundle(root, profile="Default")
+    assert read_bundle(root, profile="Other").charts
+
+
+def test_experts_only_bundle_is_still_fine(tmp_path: Path) -> None:
+    root = write_tree(tmp_path / "b", experts={EXPERT: b"x"})
+    assert read_bundle(root, profile="Default").experts == [EXPERT]

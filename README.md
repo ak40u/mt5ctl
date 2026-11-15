@@ -268,7 +268,7 @@ bundles/demo1/
     └── Breakout GBPUSD H1.ex5
 ```
 
-- One profile per bundle, matching the terminal's `profile` (default `Default`).
+- One profile per bundle, matching the terminal's `profile` (default `Default`); a bundle with charts for another profile is refused.
 - A chart's expert is found through its `path=` line (`Experts\Portfolio\…ex5`)
   and must be in the bundle.
 - A chart without an expert is fine — for example, to put a symbol into Market
