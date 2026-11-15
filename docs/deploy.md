@@ -76,8 +76,13 @@ two minutes. What no program can cover: the machine running mt5ctl losing power
 or the process being killed outright (SIGKILL), and a connection that stays
 down longer than the retries; the error then says the terminal is stopped.
 
-A deploy with nothing to change does not restart the terminal; its verify reads
-the journal since the terminal's latest start (today's and yesterday's files).
+A deploy with nothing to change does not restart the terminal; its verify, like
+`mt5ctl verify` and `start` of a terminal that already runs, reads the journal
+since the terminal's latest start, going back through older files until it
+finds it. After a start, verify reads only what the journal gained since just
+before it; if mt5ctl could not read where the journal ended (three tries), the
+start it finds could be an earlier one, so the result says so and is not
+healthy.
 
 ## Adopting a running terminal
 

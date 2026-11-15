@@ -308,30 +308,67 @@ async def _journal_cursor(host: Host, term: Terminal) -> JournalCursor:
     return JournalCursor("", 0)
 
 
-def _previous_day(name: str) -> str:
-    """The journal file of the day before *name* (``YYYYMMDD.log``), or *name*."""
+def _previous_day(name: str, days: int = 1) -> str:
+    """The journal file *days* before *name* (``YYYYMMDD.log``), or *name*."""
     stem, _, suffix = name.partition(".")
     try:
         day = time.strptime(stem, "%Y%m%d")
     except ValueError:
         return name
-    previous = time.gmtime(time.mktime(day) - 12 * 3600)
+    previous = time.gmtime(time.mktime(day) - (days - 1) * 86400 - 12 * 3600)
     return time.strftime("%Y%m%d", previous) + (f".{suffix}" if suffix else "")
+
+
+CURSOR_UNKNOWN = (
+    "where the journal ended before the start could not be read, so the start "
+    "found may be an earlier one"
+)
+
+
+async def _start_reader(
+    host: Host, term: Terminal
+) -> tuple[Callable[[], Awaitable[str]], str | None]:
+    """How to read what a start is about to log, taken before the start.
+
+    The journal's end is read (three tries); the reader then returns only what
+    comes after it. If it cannot be read, the journal since its latest start
+    stands in, with a note: that start may be an older one, and a verify on it
+    must not pass as healthy.
+    """
+    for attempt in range(3):
+        try:
+            result = await transport.run(host, scripts.build_log_cursor_script(term.data_dir))
+        except RemoteCommandError:
+            if attempt < 2:
+                await asyncio.sleep(1)
+            continue
+        for fields in _lines(result.stdout, "CURSOR"):
+            if len(fields) >= 2:
+                name = _unb64(fields[0]).decode("utf-8", "replace")
+                return _since(
+                    host, term, JournalCursor(name, _int_or_none(fields[1]) or 0)
+                ), None
+    return _since_latest_start(host, term), CURSOR_UNKNOWN
 
 
 async def _recent_journal(host: Host, term: Terminal) -> str:
     """Journal text since the terminal's latest start (verify without a restart).
 
-    Reads yesterday's and today's files, so a terminal started before midnight
-    is judged on its own start, then cuts at the last start line (see
+    Reads from yesterday's file, then further back (a week, a month, all of
+    it) until a start line turns up, and cuts at the last one (see
     :data:`mt5spec.LOG_TERMINAL_STARTED_RE`). Without a start line the text is
     returned whole.
     """
     newest = await _journal_cursor(host, term)
     if not newest.name:
         return ""
-    since = JournalCursor(_previous_day(newest.name), 0)
-    text = await _journal_since(host, term, since)
+    # A terminal runs for weeks: go back until the journal shows its start.
+    text = ""
+    for days in (1, 7, 31, 0):
+        since = JournalCursor(_previous_day(newest.name, days) if days else "", 0)
+        text = await _journal_since(host, term, since)
+        if mt5spec.LOG_TERMINAL_STARTED_RE.search(text):
+            break
     return since_latest_start(text)
 
 
@@ -509,12 +546,19 @@ async def _verify(
     timeout: float,
     interval: float,
     require_start: bool = False,
+    note: str | None = None,
 ) -> VerifyReport:
-    """Poll until healthy or *timeout*; report the last snapshot (never changes anything)."""
+    """Poll until healthy or *timeout*; report the last snapshot (never changes anything).
+
+    With *note*, the verdict cannot be trusted: the report says why and is
+    never healthy.
+    """
     deadline = time.monotonic() + timeout
     while True:
         st = (await status(registry, [term.id]))[0]
         report = evaluate_verify(st, await journal(), expected, require_start=require_start)
+        if note is not None:
+            report = replace(report, healthy=False, note=note)
         if report.healthy or _settled(report) or time.monotonic() + interval > deadline:
             return report
         await asyncio.sleep(interval)
@@ -749,16 +793,17 @@ async def restart(
     timeout = _verify_window(verify_timeout, VERIFY_TIMEOUT_S)
     async with _locked(host, term):
         expected = await _live_experts(registry, term)
-        cursor = await _journal_cursor(host, term)
+        reader, note = await _start_reader(host, term)
         await _uncancellable(_control(host, term, "restart"))
         report = await _verify(
             registry,
             term,
-            _since(host, term, cursor),
+            reader,
             expected,
             timeout=timeout,
             interval=VERIFY_INTERVAL_S,
             require_start=True,
+            note=note,
         )
     return RestartResult(terminal=term.id, verify=report)
 
@@ -828,16 +873,30 @@ async def start(
     timeout = _verify_window(verify_timeout, VERIFY_TIMEOUT_S)
     async with _locked(host, term):
         expected = await _live_experts(registry, term)
-        cursor = await _journal_cursor(host, term)
+        (before,) = await status(registry, [term.id])
+        if before.service_state == "active" and before.terminal_running is not False:
+            # Starting a running unit does nothing and logs no start: judge the
+            # terminal on the start it already had.
+            report = await _verify(
+                registry,
+                term,
+                _since_latest_start(host, term),
+                expected,
+                timeout=timeout,
+                interval=VERIFY_INTERVAL_S,
+            )
+            return RestartResult(terminal=term.id, verify=report, already_running=True)
+        reader, note = await _start_reader(host, term)
         await _uncancellable(_control(host, term, "start"))
         report = await _verify(
             registry,
             term,
-            _since(host, term, cursor),
+            reader,
             expected,
             timeout=timeout,
             interval=VERIFY_INTERVAL_S,
             require_start=True,
+            note=note,
         )
     return RestartResult(terminal=term.id, verify=report)
 
@@ -1000,7 +1059,8 @@ async def deploy(
         stop_requested = False
         stop_result: StopResult | None = None
         outcome: _ApplyOutcome | None = None
-        cursor = JournalCursor("", 0)
+        reader: Callable[[], Awaitable[str]] = _since_latest_start(host, term)
+        note: str | None = None
         before = await collect_state(registry, term, bundle.files)
         current = compute_plan(bundle, before)
         if current.blocked:
@@ -1055,23 +1115,24 @@ async def deploy(
         finally:
             if stop_requested:
 
-                async def start_again() -> JournalCursor:
-                    mark = await _journal_cursor(host, term)
+                async def start_again() -> tuple[Callable[[], Awaitable[str]], str | None]:
+                    mark = await _start_reader(host, term)
                     await _start_again(host, term)
                     return mark
 
-                cursor = await _uncancellable(start_again())
+                reader, note = await _uncancellable(start_again())
 
         if outcome is not None and outcome.error is not None and outcome.restore != "applied":
             raise DeployError(_apply_failure(term, outcome))
         report = await _verify(
             registry,
             term,
-            _since(host, term, cursor),
+            reader,
             bundle_instances(bundle),
             timeout=timeout,
             interval=interval,
             require_start=True,
+            note=note,
         )
     return DeployResult(
         terminal=term.id,

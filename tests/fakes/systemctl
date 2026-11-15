@@ -21,6 +21,8 @@ case "$cmd" in
     st=$(state "$1"); echo "$st"; [ "$st" = active ] ;;
   start|stop|restart)
     u="$1"; echo "$cmd $u" >> "$D/calls"
+    # Like systemd: starting an active unit does nothing (no start hook runs).
+    [ "$cmd" = start ] && [ "$(state "$u")" = active ] && exit 0
     [ -f "$D/$u.fail-$cmd" ] && { echo "fake: $cmd failed" >&2; exit 1; }
     if [ -f "$D/$u.drop-$cmd" ]; then  # the connection drops once: ssh's exit 255
       rm -f "$D/$u.drop-$cmd"; echo "fake: connection closed" >&2; exit 255

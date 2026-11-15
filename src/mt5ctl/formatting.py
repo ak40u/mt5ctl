@@ -174,6 +174,8 @@ def status_payload(rows: list[TerminalStatus]) -> list[dict[str, Any]]:
 
 def restart_lines(result: RestartResult, verb: str = "restarted") -> list[str]:
     state = "healthy" if result.verify.healthy else "NOT healthy"
+    if result.already_running:
+        verb = "already running:"
     lines = [f"{verb} {result.terminal}: {state} — {result.verify.detail}"]
     if result.verify.pending:
         lines.append("  not loaded yet: " + ", ".join(result.verify.pending))

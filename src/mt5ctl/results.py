@@ -70,6 +70,9 @@ class VerifyReport:
     ``None`` when not checked (verifying a terminal that was already running)."""
     errors: tuple[str, ...] = ()
     """Error-level journal messages in the judged part of the journal."""
+    note: str | None = None
+    """Why the verdict cannot be trusted, when it cannot (the report is then
+    not healthy)."""
 
     @property
     def detail(self) -> str:
@@ -91,6 +94,8 @@ class VerifyReport:
             parts.append("failed: " + ", ".join(self.failed))
         if self.errors:
             parts.append(f"{len(self.errors)} error(s) in the journal")
+        if self.note:
+            parts.append(self.note)
         return "; ".join(parts)
 
 
@@ -143,6 +148,8 @@ class AdoptResult:
 class RestartResult:
     terminal: str
     verify: VerifyReport
+    already_running: bool = False
+    """``start`` of a terminal that was running: nothing was started."""
 
 
 @dataclass(frozen=True, slots=True)
