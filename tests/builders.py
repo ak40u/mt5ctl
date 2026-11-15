@@ -80,3 +80,11 @@ def write_manifest(data_dir: Path, files: Mapping[str, str], profile: str = "Def
 EXPERT = "MQL5/Experts/Portfolio/Trend.ex5"
 CHART1 = "MQL5/Profiles/Charts/Default/chart01.chr"
 CHART2 = "MQL5/Profiles/Charts/Default/chart02.chr"
+
+
+def plant_lock(data: Path, target: str) -> Path:
+    """A terminal lock as another mt5ctl run leaves it: ``<holder> <epoch>``."""
+    lock = data / ".mt5ctl" / "lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.symlink_to(target)
+    return lock

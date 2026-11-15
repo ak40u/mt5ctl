@@ -38,7 +38,7 @@ def test_lock_round_trip(tmp_path: Path) -> None:
     data = str(tmp_path / "it's here")
     assert "LOCK|acquired" in run(scripts.build_lock_acquire_script(data, "a", 600)).stdout
     held = run(scripts.build_lock_acquire_script(data, "b", 600))
-    assert (held.returncode, held.stdout.strip()) == (1, "LOCK|held|a")
+    assert held.returncode == 1 and held.stdout.startswith("LOCK|held|YQ==|")
     assert "notowner" in run(scripts.build_lock_release_script(data, "b")).stdout
     assert "released" in run(scripts.build_lock_release_script(data, "a")).stdout
     assert "acquired" in run(scripts.build_lock_acquire_script(data, "b", 600)).stdout

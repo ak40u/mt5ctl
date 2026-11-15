@@ -31,7 +31,7 @@ BACKUP_DIR = f"{STATE_DIR}/backups"
 STAGING_DIR = f"{STATE_DIR}/staging"
 # An atomic mkdir is the lock primitive: it survives across separate SSH
 # sessions, which a per-process flock cannot.
-LOCK_DIR = f"{STATE_DIR}/deploy.lock.d"
+LOCK_PATH = f"{STATE_DIR}/lock"
 BACKUPS_KEPT = 5
 CONTROL_ACTIONS = ("start", "stop", "restart")
 
@@ -223,31 +223,60 @@ exit 1
 
 
 def build_lock_acquire_script(data_dir: str, holder: str, stale_s: int) -> str:
-    """Take the per-terminal lock: ``LOCK|acquired``, ``LOCK|takeover`` or ``LOCK|held``.
+    """Take the per-terminal lock: ``LOCK|acquired``, ``LOCK|takeover`` or
+    ``LOCK|held|<b64 holder>|<age s>``.
 
-    A lock older than *stale_s* is taken over; a deploy has no heartbeat, so
-    *stale_s* must exceed the longest possible deploy.
+    The lock is a symbolic link whose target is ``<holder> <epoch seconds>``:
+    creating it is atomic and carries its owner, so there is never a lock
+    without one. The timestamp is read as data and checked to be a plain
+    number before any arithmetic (an unreadable one makes the lock stale).
+    A lock older than *stale_s* is taken over, one taker at a time (a
+    ``.takeover`` mutex), and only if it is still the lock that was judged
+    stale; a deploy has no heartbeat, so *stale_s* must exceed the longest run.
     """
     return f"""\
 set +e
+{HELPERS}
 DIR={sh_quote(data_dir)}
 H={sh_quote(holder)}
-LD="$DIR/{LOCK_DIR}"
+L="$DIR/{LOCK_PATH}"
+M="$L.takeover"
 mkdir -p "$DIR/{STATE_DIR}"
-if mkdir "$LD" 2>/dev/null; then
-  printf '%s %s\\n' "$H" "$(date +%s)" > "$LD/owner"; echo "LOCK{SEP}acquired"; exit 0
-fi
-ts=$(awk '{{print $2}}' "$LD/owner" 2>/dev/null)
 now=$(date +%s)
-if [ -n "$ts" ] && [ $((now - ts)) -gt {int(stale_s)} ]; then
-  rm -rf "$LD"
-  if mkdir "$LD" 2>/dev/null; then
-    printf '%s %s\\n' "$H" "$now" > "$LD/owner"; echo "LOCK{SEP}takeover"; exit 0
+if ln -s "$H $now" "$L" 2>/dev/null; then echo "LOCK{SEP}acquired"; exit 0; fi
+cur=$(readlink "$L" 2>/dev/null)
+ts=${{cur##* }}
+case "$ts" in ''|*[!0-9]*) ts=0 ;; esac
+[ "${{#ts}}" -le 12 ] || ts=0
+age=$((now - ts))
+if [ "$age" -gt {int(stale_s)} ]; then
+  if [ -d "$M" ]; then
+    mt=$(fmtime "$M"); case "$mt" in ''|*[!0-9]*) mt=0 ;; esac
+    [ $((now - mt)) -gt 60 ] && rmdir "$M" 2>/dev/null
+  fi
+  if mkdir "$M" 2>/dev/null; then
+    if [ "$(readlink "$L" 2>/dev/null)" = "$cur" ]; then
+      rm -f "$L"
+      if ln -s "$H $now" "$L" 2>/dev/null; then
+        rmdir "$M"; echo "LOCK{SEP}takeover"; exit 0
+      fi
+    fi
+    rmdir "$M"
   fi
 fi
-echo "LOCK{SEP}held{SEP}$(awk '{{print $1}}' "$LD/owner" 2>/dev/null)"
+echo "LOCK{SEP}held{SEP}$(b64s "${{cur% *}}"){SEP}$age"
 exit 1
 """
+
+
+def lock_guard(holder: str, tag: str) -> str:
+    """Script lines that stop with ``<tag>|lost`` unless *holder* still owns the lock.
+
+    Put before any write: a run whose lock was taken over must not write.
+    """
+    return f"""\
+_lk=$(readlink "$DIR/{LOCK_PATH}" 2>/dev/null)
+if [ "${{_lk% *}}" != {sh_quote(holder)} ]; then echo "{tag}{SEP}lost"; exit 3; fi"""
 
 
 def build_lock_release_script(data_dir: str, holder: str) -> str:
@@ -256,9 +285,10 @@ def build_lock_release_script(data_dir: str, holder: str) -> str:
 set +e
 DIR={sh_quote(data_dir)}
 H={sh_quote(holder)}
-LD="$DIR/{LOCK_DIR}"
-if [ "$(awk '{{print $1}}' "$LD/owner" 2>/dev/null)" = "$H" ]; then
-  rm -rf "$LD"; echo "LOCK{SEP}released"
+L="$DIR/{LOCK_PATH}"
+cur=$(readlink "$L" 2>/dev/null)
+if [ -n "$cur" ] && [ "${{cur% *}}" = "$H" ]; then
+  rm -f "$L"; echo "LOCK{SEP}released"
 else
   echo "LOCK{SEP}notowner"
 fi
@@ -357,6 +387,7 @@ def build_apply_script(
     remove: Iterable[str],
     manifest_json: str,
     unit_user: str,
+    holder: str | None = None,
 ) -> str:
     """Verify staged files, move them into place, remove dropped ones, write the manifest.
 
@@ -365,8 +396,10 @@ def build_apply_script(
     move**, so a truncated upload aborts with the terminal untouched. The
     manifest is written last: if any step fails (``set -e``), the old manifest
     still describes the old state and the orchestrator restores the backup.
-    Prints ``APPLY|ok``, or ``APPLY|hashfail|<path>`` before exiting 1.
+    Prints ``APPLY|ok``, or ``APPLY|hashfail|<path>`` before exiting 1. With
+    *holder*, nothing is written unless it still owns the lock (``APPLY|lost``).
     """
+    guard = lock_guard(holder, "APPLY") if holder else ""
     verify = "\n".join(
         f'f={sh_quote(rel)}; [ "$(sha "$STG/$f")" = {sh_quote(sha)} ] '
         f'|| {{ echo "APPLY{SEP}hashfail{SEP}$f"; exit 1; }}'
@@ -381,6 +414,7 @@ def build_apply_script(
 set -e
 {HELPERS}
 DIR={sh_quote(data_dir)}
+{guard}
 STG="$DIR/"{sh_quote(staging)}
 {verify}
 {moves}

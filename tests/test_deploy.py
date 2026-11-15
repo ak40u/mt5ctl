@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,7 @@ from builders import (
     EXPERT,
     FIXTURES,
     chart_bytes,
+    plant_lock,
     write_manifest,
     write_tree,
 )
@@ -106,7 +108,7 @@ def test_first_deploy_places_files_and_restarts(farm: Farm, tmp_path: Path) -> N
     assert (farm.data / CHART1).read_bytes() == chart_bytes()
     assert manifest(farm) == dict(read_bundle(bundle).files)
     assert farm.calls == ["stop mt5-demo1.service", "start mt5-demo1.service"]
-    assert not list((farm.data / ".mt5ctl").glob("deploy.lock.d"))
+    assert not os.path.lexists(farm.data / ".mt5ctl/lock")
     assert not list((farm.data / ".mt5ctl/staging").glob("*"))
 
 
@@ -264,18 +266,14 @@ def test_deploy_needs_a_service(farm: Farm, tmp_path: Path) -> None:
 
 
 def test_held_lock_refuses(farm: Farm, tmp_path: Path) -> None:
-    lock = farm.data / ".mt5ctl/deploy.lock.d"
-    lock.mkdir(parents=True)
-    (lock / "owner").write_text("other:1:abc 9999999999\n")
+    plant_lock(farm.data, "other:1:abc 9999999999")
     with pytest.raises(DeployError, match="holds the lock"):
         deploy(farm, bundle_v1(tmp_path / "v1"))
     assert farm.calls == []
 
 
 def test_stale_lock_is_taken_over(farm: Farm, tmp_path: Path) -> None:
-    lock = farm.data / ".mt5ctl/deploy.lock.d"
-    lock.mkdir(parents=True)
-    (lock / "owner").write_text("other:1:abc 1000\n")
+    plant_lock(farm.data, "other:1:abc 1000")
     farm.journal_on_start("Trend")
     assert deploy(farm, bundle_v1(tmp_path / "v1")).restarted
 
@@ -407,7 +405,7 @@ def test_manifest_written_by_deploy_is_canonical(farm: Farm, tmp_path: Path) -> 
 
 
 def lock_held(farm: Farm) -> bool:
-    return (farm.data / ".mt5ctl/deploy.lock.d").exists()
+    return os.path.lexists(farm.data / ".mt5ctl/lock")
 
 
 def test_cancelled_deploy_still_starts_the_terminal_and_unlocks(
@@ -467,9 +465,7 @@ def test_stop_that_errors_after_stopping_is_followed_by_start(
 
 
 def test_restart_refuses_while_a_deploy_holds_the_lock(farm: Farm) -> None:
-    lock = farm.data / ".mt5ctl/deploy.lock.d"
-    lock.mkdir(parents=True)
-    (lock / "owner").write_text("deploy:1:abc 9999999999\n")
+    plant_lock(farm.data, "deploy:1:abc 9999999999")
     with pytest.raises(DeployError, match="holds the lock"):
         asyncio.run(operations.restart(farm.registry, "demo1"))
     assert farm.calls == []

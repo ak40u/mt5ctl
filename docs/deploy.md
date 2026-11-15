@@ -12,9 +12,13 @@ lock ─ plan ─┬─ nothing to change ─ verify (no restart) ─ unlock
                                                          failure ── restore ─ start ─ error
 ```
 
-1. **Lock.** `.mt5ctl/deploy.lock.d` in the data folder, created atomically. A
-   second deploy, adopt or restart of the same terminal refuses while it exists.
-   A lock older than 30 minutes is taken over (a crashed run never blocks forever).
+1. **Lock.** `.mt5ctl/lock` in the data folder: a symbolic link naming the run
+   that holds it and when it took it, created atomically. A second deploy, adopt,
+   start, stop or restart of the same terminal refuses while it exists, and says
+   who holds it and since when. A lock older than an hour is taken over (a crashed
+   run never blocks forever), by one run only; a run whose lock was taken over
+   cannot write its files. To clear a lock by hand when no run is going on,
+   remove `.mt5ctl/lock`.
 2. **Plan** — the same diff `mt5ctl plan` shows. Any conflict (a bundle file that
    would land on a file mt5ctl does not manage) stops here, before the terminal
    is touched.

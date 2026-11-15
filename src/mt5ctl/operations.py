@@ -87,8 +87,10 @@ VERIFY_TIMEOUT_S = 180.0
 MAX_VERIFY_TIMEOUT_S = 600.0
 VERIFY_INTERVAL_S = 6.0
 # The lock has no heartbeat, so a takeover must wait longer than the longest
-# possible run: stop, drain, every transport timeout and the longest verify.
-LOCK_STALE_S = 1800
+# possible run: stop, drain, every transport timeout and the longest verify
+# (about 2,300 s in the worst case). A run whose lock was taken over anyway
+# cannot write: apply checks that it still owns the lock first.
+LOCK_STALE_S = 3600
 JOURNAL_TAIL_BYTES = 64 * 1024
 # Per journal file read by verify; start-up lines come first, so the head is kept.
 JOURNAL_SINCE_LIMIT = 8 * 1024 * 1024
@@ -551,43 +553,59 @@ def _timestamp() -> str:
     return time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:6]
 
 
-@contextlib.asynccontextmanager
-async def _locked(host: Host, term: Terminal) -> AsyncIterator[None]:
-    """Hold the terminal's lock for the body; release it even when cancelled.
+async def _release(host: Host, term: Terminal, holder: str) -> None:
+    await transport.run(host, scripts.build_lock_release_script(term.data_dir, holder))
 
-    One deploy, adopt or restart per terminal at a time. Release runs in a
-    shielded scope: an MCP client that gives up mid-deploy cancels the call,
-    and the cleanup must still run to completion.
+
+@contextlib.asynccontextmanager
+async def _locked(host: Host, term: Terminal) -> AsyncIterator[str]:
+    """Hold the terminal's lock for the body; yields the holder id.
+
+    One deploy, adopt, start, stop or restart per terminal at a time. Taking
+    the lock and releasing it run shielded from cancellation: a cancelled call
+    whose acquire already reached the host would otherwise leave the lock
+    behind. If taking it fails in any way, a lock this run may have created is
+    released (release only removes a lock that names this holder).
     """
     holder = _holder()
-    result = await transport.run(
-        host,
-        scripts.build_lock_acquire_script(term.data_dir, holder, LOCK_STALE_S),
-        check=False,
-    )
-    if f"LOCK{SEP}held" in result.stdout:
-        raise DeployError(
-            f"another mt5ctl run holds the lock on {term.id!r}; retry when it finishes"
-        )
+    try:
+        with anyio.CancelScope(shield=True):
+            result = await transport.run(
+                host,
+                scripts.build_lock_acquire_script(term.data_dir, holder, LOCK_STALE_S),
+                check=False,
+            )
+    except BaseException:
+        with anyio.CancelScope(shield=True), contextlib.suppress(Exception):
+            await _release(host, term, holder)
+        raise
+    for fields in _lines(result.stdout, "LOCK"):
+        if fields and fields[0] == "held":
+            owner = _unb64(fields[1]).decode("utf-8", "replace") if len(fields) > 1 else ""
+            age = _int_or_none(fields[2]) if len(fields) > 2 else None
+            raise DeployError(
+                f"another mt5ctl run holds the lock on {term.id!r} ({owner or 'unknown'}, "
+                f"taken {age // 60 if age is not None else '?'} min ago); retry when it "
+                f"finishes. A lock older than {LOCK_STALE_S // 60} minutes is taken over; "
+                f"if no run is going on, remove {term.data_dir}/{scripts.LOCK_PATH}"
+            )
     if not any(f"LOCK{SEP}{w}" in result.stdout for w in ("acquired", "takeover")):
         raise RemoteCommandError(host.id, result.returncode, result.stderr or "lock not taken")
     body_ok = False
     try:
-        yield
+        yield holder
         body_ok = True
     finally:
         with anyio.CancelScope(shield=True):
             try:
-                await transport.run(
-                    host, scripts.build_lock_release_script(term.data_dir, holder)
-                )
+                await _release(host, term, holder)
             except RemoteCommandError as exc:
                 # Never mask the body's own error; otherwise say what is left behind.
                 if body_ok:
                     raise DeployError(
                         f"the operation on {term.id} completed, but its lock could not be "
                         f"released ({exc}); it expires after {LOCK_STALE_S // 60} minutes, "
-                        f"or remove {term.data_dir}/{scripts.LOCK_DIR}"
+                        f"or remove {term.data_dir}/{scripts.LOCK_PATH}"
                     ) from None
 
 
@@ -822,7 +840,7 @@ async def deploy(
     timeout = _verify_window(verify_timeout, VERIFY_TIMEOUT_S)
     interval = VERIFY_INTERVAL_S if verify_interval is None else verify_interval
 
-    async with _locked(host, term):
+    async with _locked(host, term) as holder:
         stop_requested = False
         stop_result: StopResult | None = None
         outcome: _ApplyOutcome | None = None
@@ -854,7 +872,9 @@ async def deploy(
                 raise DeployError(_conflict_message(current))
             if current.has_changes:
                 with anyio.CancelScope(shield=True):
-                    outcome = await _apply(host, term, bundle, current, state, unit_user)
+                    outcome = await _apply(
+                        host, term, bundle, current, state, unit_user, holder
+                    )
         finally:
             if stop_requested:
                 with anyio.CancelScope(shield=True):
@@ -898,6 +918,7 @@ async def _apply(
     plan: DeployPlan,
     state: TerminalState,
     unit_user: str,
+    holder: str | None = None,
 ) -> _ApplyOutcome:
     """Back up, upload, apply; restore on failure."""
     order_file = order_relpath(bundle.profile)
@@ -919,7 +940,13 @@ async def _apply(
         await transport.run(
             host,
             scripts.build_apply_script(
-                term.data_dir, staging, shas, plan.remove, manifest.to_json(), unit_user
+                term.data_dir,
+                staging,
+                shas,
+                plan.remove,
+                manifest.to_json(),
+                unit_user,
+                holder,
             ),
         )
     except RemoteCommandError as exc:
