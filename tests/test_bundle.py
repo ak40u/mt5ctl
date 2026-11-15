@@ -208,3 +208,11 @@ def test_bundle_for_another_profile_is_refused_not_emptied(tmp_path: Path) -> No
 def test_experts_only_bundle_is_still_fine(tmp_path: Path) -> None:
     root = write_tree(tmp_path / "b", experts={EXPERT: b"x"})
     assert read_bundle(root, profile="Default").experts == [EXPERT]
+
+
+def test_charts_must_be_named_like_the_terminals(tmp_path: Path) -> None:
+    root = write_tree(
+        tmp_path / "b", charts={"eurusd.chr": chart_bytes()}, experts={EXPERT: b"x"}
+    )
+    with pytest.raises(BundleError, match=r"chartNN\.chr"):
+        read_bundle(root)

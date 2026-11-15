@@ -79,6 +79,11 @@ def decode(data: bytes) -> tuple[str, TextFormat]:
     except UnicodeDecodeError as exc:
         raise TextDecodeError(f"cannot decode as {encoding}: {exc}") from None
     newline = "\r\n" if "\r\n" in text else "\n"
+    if newline == "\r\n" and text.count("\n") != text.count("\r\n"):
+        # Written back, every line would get CRLF: not the bytes that were read.
+        raise TextDecodeError(
+            "mixed line endings (CRLF and bare LF); the terminal writes CRLF"
+        )
     fmt = TextFormat(
         encoding=encoding, bom=bom, newline=newline, final_newline=text.endswith("\n")
     )

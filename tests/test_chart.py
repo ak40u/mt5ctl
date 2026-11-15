@@ -337,3 +337,12 @@ def test_fingerprint_tracks_what_trades(change: dict[str, object]) -> None:
     base = ChartFile.parse(chart_bytes())
     changed = ChartFile.parse(chart_bytes(**change))
     assert base.fingerprint() != changed.fingerprint()
+
+
+def test_mixed_line_endings_are_refused_not_rewritten() -> None:
+    """Everything parse accepts is written back byte for byte; this could not be."""
+    data = b"<chart>\r\nsymbol=EURUSD\nperiod_type=1\r\nperiod_size=4\r\n</chart>"
+    with pytest.raises(ChartFormatError, match="mixed line endings"):
+        ChartFile.parse(data)
+    uniform = data.replace(b"EURUSD\n", b"EURUSD\r\n")
+    assert ChartFile.parse(uniform).to_bytes() == uniform

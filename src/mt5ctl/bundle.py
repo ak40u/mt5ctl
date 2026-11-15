@@ -244,6 +244,11 @@ def read_bundle(path: str | Path, profile: str | None = None) -> Bundle:
         if item.is_dir() or classify(rel, chosen) is None:
             continue
         validate_member(rel, chosen)
+        if is_chart(rel) and not mt5spec.CHART_FILE_RE.fullmatch(item.name):
+            raise BundleError(
+                f"{rel}: the terminal names its charts chartNN.chr (chart01.chr, ...); "
+                "a chart under another name would not be opened as part of the profile"
+            )
         data = item.read_bytes()
         contents[rel] = data
         if is_chart(rel):
