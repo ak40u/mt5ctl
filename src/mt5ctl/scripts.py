@@ -218,6 +218,27 @@ exit 1
 """
 
 
+def build_occupant_script(data_dir: str) -> str:
+    """Terminal processes whose working folder is *data_dir*: ``OCCUPIED|<pid>``.
+
+    Observed under Wine: the terminal's process runs in its data folder. Once
+    the unit is down, any left there is not the unit's: a registry naming
+    another terminal's unit, or a terminal started by hand. Linux only (/proc);
+    elsewhere it prints nothing.
+    """
+    return f"""\
+set +e
+{_is_terminal_function()}
+D=$(cd {sh_quote(data_dir)} 2>/dev/null && pwd -P) || exit 0
+[ -d /proc/self ] || exit 0
+for p in /proc/[0-9]*; do
+  pid=${{p#/proc/}}
+  [ "$(readlink "$p/cwd" 2>/dev/null)" = "$D" ] || continue
+  is_terminal_main "$pid" && echo "OCCUPIED{SEP}$pid"
+done
+"""
+
+
 # --------------------------------------------------------------------------- #
 # Deploy
 # --------------------------------------------------------------------------- #

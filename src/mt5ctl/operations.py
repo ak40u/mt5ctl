@@ -912,6 +912,25 @@ async def start(
 # --------------------------------------------------------------------------- #
 
 
+async def _require_unoccupied(host: Host, term: Terminal) -> None:
+    """Refuse to write while a terminal still runs on the data folder.
+
+    With the unit stopped, such a process is not the unit's: the registry may
+    name another terminal's unit, and this one would save its own charts over
+    the deploy's when it exits.
+    """
+    result = await transport.run(
+        host, scripts.build_occupant_script(term.data_dir), check=False
+    )
+    pids = [f[0] for f in _lines(result.stdout, "OCCUPIED") if f]
+    if pids:
+        raise DeployError(
+            f"a terminal still runs on {term.data_dir} (pid {', '.join(pids)}) although "
+            f"{term.id}'s {term.service or 'process'} is stopped: the registry probably "
+            "names another terminal's unit for it; nothing was written"
+        )
+
+
 async def _preflight(host: Host, term: Terminal, paths: Iterable[str] = ()) -> str:
     """Check deploy prerequisites (and that no folder on the way to *paths* is a
     symbolic link); return the unit's user."""
@@ -1109,6 +1128,7 @@ async def deploy(
                 # host, and starting a unit that is already running does nothing.
                 stop_requested = True
                 stop_result = await _stop_and_drain(host, term)
+            await _require_unoccupied(host, term)
             state = await collect_state(registry, term, bundle.files)
             moved = chart_moves(before.chart_digests, state.chart_digests)
             if moved:

@@ -910,6 +910,9 @@ def test_adopt_never_silently_unmanages_files(farm: Farm, tmp_path: Path) -> Non
     assert BREAKOUT not in manifest(farm)
 
 
+@pytest.mark.skipif(
+    hasattr(os, "geteuid") and os.geteuid() == 0, reason="root writes for any user (chown)"
+)
 def test_ssh_user_other_than_the_units_is_refused(farm: Farm, tmp_path: Path) -> None:
     """Files written as another user could not be saved over by the terminal."""
     (farm.systemd / "mt5-demo1.service.user").write_text("someone-else\n")
@@ -923,3 +926,20 @@ def test_root_hands_new_folders_to_the_units_user() -> None:
     for folder in ("MQL5/Experts", "MQL5/Experts/New", "MQL5/Experts/New/Sub"):
         assert f"'{folder}'" in block
     assert "'MQL5'" not in block.split("for d in", 1)[1]
+
+
+@pytest.mark.skipif(not Path("/proc/self").is_dir(), reason="needs Linux /proc")
+def test_a_terminal_left_on_the_folder_stops_the_deploy(farm: Farm, tmp_path: Path) -> None:
+    """The unit stopped, yet a terminal still runs on the folder: not the unit's."""
+    import subprocess
+
+    other = subprocess.Popen(
+        ["bash", "-c", "exec -a 'C:\\\\mt5\\\\terminal64.exe' sleep 30"], cwd=farm.data
+    )
+    try:
+        with pytest.raises(DeployError, match=rf"still runs on .*pid {other.pid}"):
+            deploy(farm, bundle_v1(tmp_path / "v1"))
+        assert not (farm.data / EXPERT).exists()
+        assert farm.calls == ["stop mt5-demo1.service", "start mt5-demo1.service"]
+    finally:
+        other.kill()
