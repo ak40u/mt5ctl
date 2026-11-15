@@ -248,6 +248,16 @@ def _cmd_compile(args: argparse.Namespace) -> int:
     return EXIT_OK if result.ok else EXIT_ERROR
 
 
+def _cmd_experts(args: argparse.Namespace) -> int:
+    registry = load_registry(args.config)
+    reports = asyncio.run(operations.experts(registry, args.terminals or None))
+    lines = (fmt.autotrading_lines if args.command == "autotrading" else fmt.ea_list_lines)(
+        reports
+    )
+    _output(args, [asdict(r) for r in reports], lines)
+    return EXIT_ERROR if any(r.error for r in reports) else EXIT_OK
+
+
 def _cmd_init(args: argparse.Namespace) -> int:
     target = write_starter(args.path)
     print(f"wrote {target}\nedit it, then check it with: mt5ctl doctor")
@@ -417,6 +427,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     status.add_argument("terminals", nargs="*", metavar="terminal", help="default: all")
     status.set_defaults(func=_cmd_status)
+
+    for name, help_ in (
+        ("ea-list", "each chart's expert: loaded, allowed to trade"),
+        ("autotrading", "the Algo Trading button and which experts can trade"),
+    ):
+        p = with_config(with_json(sub.add_parser(name, help=help_)))
+        p.add_argument("terminals", nargs="*", metavar="terminal", help="default: all")
+        p.set_defaults(func=_cmd_experts)
 
     init = sub.add_parser("init", help="write a starter registry (terminals.yaml)")
     init.add_argument(

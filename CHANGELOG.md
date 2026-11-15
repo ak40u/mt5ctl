@@ -51,6 +51,9 @@ All notable changes to this project are documented here. The format follows
   stdin, the environment or a private credentials file; the temporary start
   file is shredded and the terminal started again and verified. Terminals take
   an `account` setting.
+- `ea-list` and `autotrading` (CLI and MCP): each chart's expert, loaded or
+  failed, its own permission, and the terminal's Algo Trading button from the
+  journal or the start file.
 - `init`: a starter registry, mode 600, never overwriting.
 - `doctor` (CLI and MCP): tools on each host, units and their sudo rules,
   data folders, Wine and its prefix, journals and broker connections, read-only.

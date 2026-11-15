@@ -147,6 +147,13 @@ LOG_AUTH_FAILED_RE = re.compile(
 # a password, logs it in by itself. Started with /login:<account>, or with no
 # config at all, it opens the login dialog instead and waits there.
 START_CONFIG_LOGIN = "[Common]\r\nLogin={account}\r\nServer={server}\r\n"
+# The start file a terminal was launched with is read for one value only, the
+# [Experts] Enabled key (Algo Trading at start); the rest of it, which may hold
+# a password, never leaves the host. Its logged path is a Windows path: drive
+# Z: is the host's root (Wine's default), drive C: the prefix's drive_c.
+START_FILE_EXPERTS_SECTION = "experts"
+START_FILE_ALGO_KEY = "enabled"
+
 # What `info` reads from the journal. Observed (build 6320):
 #   Terminal  MetaTrader 5 x64 build 6320 started for MetaQuotes Ltd.
 #   Terminal  Windows 11 build 22000 on Wine 11.20 Linux 6.6..., 64 x <cpu>, ...
@@ -188,7 +195,12 @@ LOG_EXPERT_LOADED_RE = re.compile(
     re.IGNORECASE,
 )
 LOG_EXPERT_FAILED_RE = re.compile(
-    r"(?:loading|initializing) of (?P<name>.+?) \([^)]*\) failed", re.IGNORECASE
+    r"(?:loading|initializing) of (?P<name>.+?) "
+    r"\((?P<symbol>[^,()]*),?(?P<period>[^)]*)\) failed",
+    re.IGNORECASE,
+)
+LOG_EXPERT_REMOVED_RE = re.compile(
+    r"expert (?P<name>.+?) \((?P<symbol>[^,()]+),(?P<period>[^)]+)\) removed", re.IGNORECASE
 )
 
 

@@ -11,6 +11,7 @@ from .results import (
     Check,
     CompileResult,
     DeployResult,
+    ExpertsReport,
     LoginResult,
     LogsResult,
     RestartResult,
@@ -186,6 +187,55 @@ def stop_lines(result: StopResult) -> list[str]:
         f"(systemd Result={result.unit_result})",
         f"warning: {UNCLEAN_STOP}",
     ]
+
+
+def _algo(report: ExpertsReport) -> str:
+    state = {True: "on", False: "OFF", None: "unknown"}[report.algo_trading]
+    return f"Algo Trading {state} ({report.algo_source})"
+
+
+def _running(report: ExpertsReport) -> str:
+    return {True: "running", False: "stopped", None: "state unknown"}[report.running]
+
+
+def ea_list_lines(reports: list[ExpertsReport]) -> list[str]:
+    out: list[str] = []
+    for r in reports:
+        if r.error:
+            out.append(f"{r.terminal}: ERROR {r.error}")
+            continue
+        out.append(f"{r.terminal}: {_running(r)}; {_algo(r)}")
+        if r.trading_disabled:
+            out.append(f"  TRADING DISABLED ({r.trading_disabled})")
+        if not r.charts:
+            out.append("  no charts in the profile")
+        for c in r.charts:
+            where = f"{c.symbol or '?'} {c.timeframe or '?'}"
+            if c.expert is None:
+                out.append(f"  {c.chart:<12} {where:<14} (no expert)")
+                continue
+            allowed = "" if c.allowed is not False else "  ALGO TRADING NOT ALLOWED"
+            out.append(f"  {c.chart:<12} {where:<14} {c.expert}  [{c.state}]{allowed}")
+    return out
+
+
+def autotrading_lines(reports: list[ExpertsReport]) -> list[str]:
+    out: list[str] = []
+    for r in reports:
+        if r.error:
+            out.append(f"{r.terminal}: ERROR {r.error}")
+            continue
+        with_expert = [c for c in r.charts if c.expert]
+        blocked = [c for c in with_expert if c.allowed is False]
+        line = f"{r.terminal}: {_algo(r)}; {_running(r)}"
+        if r.running:
+            line += f"; {len(r.can_trade)} of {len(with_expert)} experts can trade"
+        out.append(line)
+        if r.trading_disabled:
+            out.append(f"  TRADING DISABLED ({r.trading_disabled})")
+        for c in blocked:
+            out.append(f"  {c.chart}: {c.expert} has its own Algo Trading off")
+    return out
 
 
 def doctor_lines(checks: list[Check]) -> list[str]:

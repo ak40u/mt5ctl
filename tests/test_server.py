@@ -27,6 +27,8 @@ TOOLS = {
     "mt5_login": False,
     "mt5_info": True,
     "mt5_doctor": True,
+    "mt5_ea_list": True,
+    "mt5_autotrading": True,
     "mt5_logs": True,
 }
 

@@ -35,11 +35,14 @@ from .bundle import (
     render_order,
     validate_member,
 )
+from .chart import ChartFile
 from .errors import (
+    ChartFormatError,
     CompileError,
     ConfirmationRequiredError,
     DeployError,
     LoginError,
+    Mt5ctlError,
     RemoteCommandError,
     UsageError,
 )
@@ -48,9 +51,11 @@ from .models import Env, Host, HostKind, Registry, Terminal
 from .reconcile import DeployPlan, TerminalState, compute_plan
 from .results import (
     AdoptResult,
+    ChartExpert,
     Check,
     CompileResult,
     DeployResult,
+    ExpertsReport,
     LoginResult,
     LogsResult,
     RestartResult,
@@ -59,7 +64,13 @@ from .results import (
     TerminalStatus,
     VerifyReport,
 )
-from .state import build_state_script, parse_state_output, read_local_state
+from .state import (
+    build_state_script,
+    charts_from_output,
+    parse_state_output,
+    read_local_charts,
+    read_local_state,
+)
 from .text import decode_lenient
 
 SEP = scripts.SEP
@@ -1093,7 +1104,10 @@ def journal_info(terminal: str, text: str) -> TerminalInfo:
     )
 
 
-async def _info_for_host(host: Host, terms: list[Terminal]) -> list[TerminalInfo]:
+async def _journals(host: Host, terms: list[Terminal]) -> dict[str, tuple[str, str]] | str:
+    """Per terminal: (newest journal file name, the end of the file before it and
+    of that file, decoded); ``("", "")`` without a journal. An error message
+    instead when the host cannot be read."""
     script = scripts.build_log_tails_script(
         [(t.id, t.data_dir) for t in terms],
         (mt5spec.JOURNAL_DIR,),
@@ -1103,16 +1117,27 @@ async def _info_for_host(host: Host, terms: list[Terminal]) -> list[TerminalInfo
     try:
         result = await transport.run(host, script)
     except RemoteCommandError as exc:
-        return [TerminalInfo(terminal=t.id, error=str(exc)) for t in terms]
+        return str(exc)
     tails = _tails(result.stdout)
-    out = []
+    out = {}
     for term in terms:
         name, _size, tail, prev = tails.get(term.id, ("", 0, b"", b""))
+        text = decode_lenient(prev).lstrip("\ufeff") + "\n" + decode_lenient(tail)
+        out[term.id] = (name, text.replace("\r", "") if name else "")
+    return out
+
+
+async def _info_for_host(host: Host, terms: list[Terminal]) -> list[TerminalInfo]:
+    journals = await _journals(host, terms)
+    if isinstance(journals, str):
+        return [TerminalInfo(terminal=t.id, error=journals) for t in terms]
+    out = []
+    for term in terms:
+        name, text = journals[term.id]
         if not name:
             out.append(TerminalInfo(terminal=term.id, error="no journal yet"))
             continue
-        text = decode_lenient(prev).lstrip("\ufeff") + "\n" + decode_lenient(tail)
-        out.append(replace(journal_info(term.id, text.replace("\r", "")), log_file=name))
+        out.append(replace(journal_info(term.id, text), log_file=name))
     return out
 
 
@@ -1129,6 +1154,189 @@ async def info(
         *(_info_for_host(registry.hosts[h], ts) for h, ts in by_host.items())
     )
     found = {i.terminal: i for group in groups for i in group}
+    return [found[i] for i in ids]
+
+
+# --------------------------------------------------------------------------- #
+# Experts and Algo Trading
+# --------------------------------------------------------------------------- #
+
+_WINDOWS_PATH_RE = re.compile(r"([A-Za-z]):\\(.*)")
+
+
+def host_path(windows_path: str, wineprefix: str | None) -> str | None:
+    """Where a path the terminal logged lives on the host; ``None`` when unknown.
+
+    Drive Z: is the host's root (Wine's default mapping); drive C: is the
+    prefix's ``drive_c``, known only when the terminal's ``wineprefix`` is set.
+    """
+    m = _WINDOWS_PATH_RE.fullmatch(windows_path.strip())
+    if m is None:
+        return None
+    drive, rest = m[1].upper(), m[2].replace("\\", "/")
+    if drive == "Z":
+        return "/" + rest
+    if drive == "C" and wineprefix:
+        return f"{wineprefix.rstrip('/')}/drive_c/{rest}"
+    return None
+
+
+def journal_chart_states(session: str) -> dict[tuple[str, str, str], str]:
+    """The latest ``loaded`` / ``failed`` / ``removed`` per (expert, symbol, period)."""
+    events = []
+    for state, regex in (
+        ("loaded", mt5spec.LOG_EXPERT_LOADED_RE),
+        ("failed", mt5spec.LOG_EXPERT_FAILED_RE),
+        ("removed", mt5spec.LOG_EXPERT_REMOVED_RE),
+    ):
+        events += [(m.start(), state, m) for m in regex.finditer(session)]
+    out: dict[tuple[str, str, str], str] = {}
+    for _pos, state, m in sorted(events, key=lambda e: e[0]):
+        key = (
+            m["name"].strip().lower(),
+            m["symbol"].strip().lower(),
+            m["period"].strip().upper(),
+        )
+        out[key] = state
+    return out
+
+
+async def _profile_charts(registry: Registry, term: Terminal) -> dict[str, bytes | None]:
+    host = registry.host_of(term)
+    if host.kind is HostKind.LOCAL:
+        return read_local_charts(term.data_dir, term.profile)
+    result = await transport.run(
+        host, build_state_script(term.data_dir, term.profile, []), timeout=120.0
+    )
+    return charts_from_output(result.stdout, term.profile)
+
+
+def _chart_experts(
+    charts: Mapping[str, bytes | None], states: dict[tuple[str, str, str], str] | None
+) -> tuple[ChartExpert, ...]:
+    out = []
+    for rel, data in sorted(charts.items()):
+        name = rel.rsplit("/", 1)[-1]
+        try:
+            chart = ChartFile.parse(data) if data is not None else None
+        except ChartFormatError:
+            chart = None
+        if chart is None:
+            out.append(ChartExpert(name, None, None, None, state="unreadable"))
+            continue
+        symbol = chart.symbol
+        tf = chart.timeframe.name if chart.timeframe else None
+        expert = chart.expert
+        if expert is None:
+            out.append(ChartExpert(name, symbol, tf, None))
+            continue
+        state = "-"
+        if states is not None:
+            key = (expert.name.strip().lower(), (symbol or "").lower(), tf or "")
+            state = states.get(key, "not loaded")
+        out.append(
+            ChartExpert(
+                name,
+                symbol,
+                tf,
+                expert.name,
+                path=expert.path,
+                allowed=expert.algo_trading,
+                state=state,
+            )
+        )
+    return tuple(out)
+
+
+def _algo_from_start_file(
+    start_config: str | None, value: list[str] | None
+) -> tuple[bool | None, str]:
+    if start_config is None:
+        return None, "the journal names no start file"
+    if value is None:
+        return None, f"start file not readable from the host: {start_config}"
+    if value[0] == "missing":
+        return None, f"start file not found: {start_config}"
+    setting = value[1] if len(value) > 1 else ""
+    if setting == "1":
+        return True, "start file: [Experts] Enabled=1"
+    if setting == "0":
+        return False, "start file: [Experts] Enabled=0"
+    return (
+        None,
+        "the start file does not set [Experts] Enabled; the terminal keeps its last state",
+    )
+
+
+async def _experts_for_host(
+    registry: Registry, host: Host, terms: list[Terminal]
+) -> list[ExpertsReport]:
+    journals = await _journals(host, terms)
+    if isinstance(journals, str):
+        return [ExpertsReport(terminal=t.id, error=journals) for t in terms]
+    sessions = {t.id: since_latest_start(journals[t.id][1]) for t in terms}
+    infos = {t.id: journal_info(t.id, journals[t.id][1]) for t in terms}
+    wanted = []
+    for t in terms:
+        logged = infos[t.id].start_config
+        if logged and (path := host_path(logged, t.wineprefix)):
+            wanted.append((t.id, path))
+    start_values: dict[str, list[str]] = {}
+    if wanted:
+        result = await transport.run(
+            host, scripts.build_start_file_script(wanted), check=False
+        )
+        start_values = {f[0]: f[1:] for f in _lines(result.stdout, "START") if f}
+    rows = {s.terminal: s for s in await status(registry, [t.id for t in terms])}
+    charts = await asyncio.gather(
+        *(_profile_charts(registry, t) for t in terms), return_exceptions=True
+    )
+    out = []
+    for term, profile in zip(terms, charts, strict=True):
+        if isinstance(profile, BaseException):
+            if not isinstance(profile, Mt5ctlError):
+                raise profile
+            out.append(ExpertsReport(terminal=term.id, error=str(profile)))
+            continue
+        st = rows.get(term.id)
+        running = None if st is None or st.error else st.service_state == "active"
+        session = sessions[term.id]
+        toggled = journal_algo_trading(session) if running else None
+        algo: bool | None
+        if toggled is not None:
+            algo, source = toggled, "switched in the terminal during this session"
+        else:
+            algo, source = _algo_from_start_file(
+                infos[term.id].start_config, start_values.get(term.id)
+            )
+        states = journal_chart_states(session) if running else None
+        out.append(
+            ExpertsReport(
+                terminal=term.id,
+                running=running,
+                algo_trading=algo,
+                algo_source=source,
+                trading_disabled=journal_trading_disabled(session) if running else None,
+                charts=_chart_experts(profile, states),
+            )
+        )
+    return out
+
+
+async def experts(
+    registry: Registry, terminal_ids: list[str] | None = None
+) -> list[ExpertsReport]:
+    """Each terminal's charts and experts, whether each is loaded and allowed to
+    trade, and the terminal's Algo Trading button. Read-only."""
+    ids = list(registry.terminals) if terminal_ids is None else terminal_ids
+    terms = [registry.terminal(i) for i in ids]
+    by_host: dict[str, list[Terminal]] = {}
+    for term in terms:
+        by_host.setdefault(term.host, []).append(term)
+    groups = await asyncio.gather(
+        *(_experts_for_host(registry, registry.hosts[h], ts) for h, ts in by_host.items())
+    )
+    found = {r.terminal: r for group in groups for r in group}
     return [found[i] for i in ids]
 
 

@@ -111,6 +111,39 @@ def assemble_state(
 # --------------------------------------------------------------------------- #
 
 
+def read_local_charts(data_dir: str | Path, profile: str) -> dict[str, bytes | None]:
+    """The raw chart files of a profile on this machine (``None``: unreadable)."""
+    charts: dict[str, bytes | None] = {}
+    profile_dir = Path(data_dir) / charts_dir(profile)
+    if profile_dir.is_dir():
+        for item in sorted(profile_dir.glob("*.chr")):
+            if not item.is_file():
+                continue
+            rel = f"{charts_dir(profile)}/{item.name}"
+            try:
+                charts[rel] = item.read_bytes()
+            except OSError:
+                charts[rel] = None
+    return charts
+
+
+def charts_from_output(stdout: str, profile: str) -> dict[str, bytes | None]:
+    """The raw chart files in :func:`build_state_script` output."""
+    charts: dict[str, bytes | None] = {}
+    try:
+        for line in stdout.splitlines():
+            tag, _, rest = line.partition(SEP)
+            if tag == "CHART":
+                name_b64, _, content_b64 = rest.partition(SEP)
+                name = _b64(name_b64).decode("utf-8", "replace")
+                charts[f"{charts_dir(profile)}/{name}"] = (
+                    _b64(content_b64) if content_b64 else None
+                )
+    except (binascii.Error, ValueError) as exc:
+        raise StateError(f"unreadable state output from the terminal host: {exc}") from None
+    return charts
+
+
 def read_local_state(
     data_dir: str | Path, profile: str, bundle_paths: Iterable[str]
 ) -> TerminalState:
@@ -123,17 +156,7 @@ def read_local_state(
         manifest_path.read_text(encoding="utf-8") if manifest_path.is_file() else None
     )
 
-    charts: dict[str, bytes | None] = {}
-    profile_dir = root / charts_dir(profile)
-    if profile_dir.is_dir():
-        for item in sorted(profile_dir.glob("*.chr")):
-            if not item.is_file():
-                continue
-            rel = f"{charts_dir(profile)}/{item.name}"
-            try:
-                charts[rel] = item.read_bytes()
-            except OSError:
-                charts[rel] = None
+    charts = read_local_charts(root, profile)
 
     paths = list(bundle_paths)
     experts: dict[str, str | None] = {}

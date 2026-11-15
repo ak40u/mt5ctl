@@ -87,6 +87,22 @@ def build_server(config: str | None = None) -> MCPServer:
 
     @mcp.tool(annotations=READ_ONLY)
     @_guard
+    async def mt5_ea_list(terminal: str = "all") -> str:
+        """Each chart of one or all terminals: symbol, timeframe, expert, whether
+        the expert is loaded (from the journal) and allowed to trade."""
+        ids = None if terminal == "all" else [terminal]
+        return "\n".join(fmt.ea_list_lines(await operations.experts(tools.registry, ids)))
+
+    @mcp.tool(annotations=READ_ONLY)
+    @_guard
+    async def mt5_autotrading(terminal: str = "all") -> str:
+        """The Algo Trading button of one or all terminals (from the journal, or the
+        start file's [Experts] Enabled) and how many experts can trade."""
+        ids = None if terminal == "all" else [terminal]
+        return "\n".join(fmt.autotrading_lines(await operations.experts(tools.registry, ids)))
+
+    @mcp.tool(annotations=READ_ONLY)
+    @_guard
     async def mt5_doctor() -> str:
         """Check every host and terminal for what mt5ctl needs: tools, units and
         sudo rules, data folders, Wine, journals, and broker connections."""

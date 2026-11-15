@@ -546,6 +546,40 @@ checkterm() {{
 """
 
 
+def build_start_file_script(specs: Iterable[tuple[str, str]]) -> str:
+    """The ``[Experts] Enabled`` value of each terminal's start file, and nothing else.
+
+    Each spec is ``(terminal id, host path of the start file)``. Output::
+
+        START|<id>|missing
+        START|<id>|ok|<value, empty when the key is absent>
+
+    The file may hold a password: only that one value is printed. NUL, CR and
+    byte-order-mark bytes are dropped first, which turns a UTF-16 file with
+    ASCII keys into plain text.
+    """
+    calls = "\n".join(f"startfile {sh_quote(tid)} {sh_quote(path)}" for tid, path in specs)
+    sect = mt5spec.START_FILE_EXPERTS_SECTION
+    key = mt5spec.START_FILE_ALGO_KEY
+    return f"""\
+set +e
+export LC_ALL=C
+startfile() {{
+  if [ ! -f "$2" ]; then echo "START{SEP}$1{SEP}missing"; return; fi
+  v=$(tr -d '\\000\\r\\376\\377\\357\\273\\277' < "$2" | awk '
+    /^[ \\t]*\\[/ {{ s = tolower($0); gsub(/[][ \\t]/, "", s); next }}
+    s == "{sect}" {{
+      k = $0; sub(/=.*/, "", k); gsub(/[ \\t]/, "", k)
+      if (tolower(k) == "{key}") {{ v = $0; sub(/^[^=]*=/, "", v); gsub(/[ \\t]/, "", v) }}
+    }}
+    END {{ print v }}')
+  case "$v" in *[!0-9]*) v="?" ;; esac
+  echo "START{SEP}$1{SEP}ok{SEP}$v"
+}}
+{calls}
+"""
+
+
 def build_log_cursor_script(data_dir: str) -> str:
     """Remember where the journal ends now: ``CURSOR|<b64 file name>|<size>``.
 

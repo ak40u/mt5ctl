@@ -146,6 +146,46 @@ class RestartResult:
 
 
 @dataclass(frozen=True, slots=True)
+class ChartExpert:
+    """One chart of the profile and the expert it runs."""
+
+    chart: str
+    """The chart file's name, e.g. ``chart01.chr``."""
+    symbol: str | None
+    timeframe: str | None
+    expert: str | None
+    """The expert's name; ``None`` for a chart without one."""
+    path: str | None = None
+    allowed: bool | None = None
+    """The expert's own "Allow Algo Trading" (bit 0 of ``expertmode``)."""
+    state: str = "-"
+    """From the journal's latest session: ``loaded``, ``failed``, ``removed`` or
+    ``not loaded``; ``-`` for a chart without an expert or a stopped terminal."""
+
+
+@dataclass(frozen=True, slots=True)
+class ExpertsReport:
+    """A terminal's experts and whether they can trade."""
+
+    terminal: str
+    running: bool | None = None
+    algo_trading: bool | None = None
+    """The terminal's Algo Trading button; ``None`` when nothing tells."""
+    algo_source: str = ""
+    """What :attr:`algo_trading` comes from: the journal or the start file."""
+    trading_disabled: str | None = None
+    charts: tuple[ChartExpert, ...] = ()
+    error: str | None = None
+
+    @property
+    def can_trade(self) -> tuple[ChartExpert, ...]:
+        """Experts that are loaded and allowed, on a terminal whose button is on."""
+        if self.algo_trading is False or self.trading_disabled or not self.running:
+            return ()
+        return tuple(c for c in self.charts if c.state == "loaded" and c.allowed is not False)
+
+
+@dataclass(frozen=True, slots=True)
 class Check:
     """One line of ``doctor``: ``ok``, ``warn`` (works, with less) or ``fail``."""
 

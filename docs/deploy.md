@@ -261,7 +261,11 @@ passes with `/config:` (the same file that names the account, see
 Enabled=1
 ```
 
-Every `deploy` and `restart` then switches it back on. `status` and `verify`
+Every `deploy` and `restart` then switches it back on. `mt5ctl autotrading`
+reports the button: from the journal when it was switched during the session,
+otherwise from the start file the journal says the terminal was launched with
+(only its `[Experts] Enabled` value is read; the rest of the file, which may
+hold a password, never leaves the host). `status` and `verify`
 report `ALGO TRADING OFF` (and "not healthy") when the journal shows it was
 switched off after the latest start. Each expert also has its own "Allow Algo
 Trading" (bit 0 of `expertmode` in its chart); `bundle check` warns about
