@@ -160,14 +160,15 @@ START_FILE_ALGO_KEY = "enabled"
 #   Terminal  launched with <the /config: start file, as a Windows path>
 #   Network   '<login>': authorized on <server> through <access point>
 #   Network   '<login>': terminal synchronized with <company>: 0 positions, 0 orders, ...
-# No ping is written with the authorization (MetaTrader 4 wrote one); the
-# pattern takes one if a build adds it.
+# Darwinex-Live writes no ping with the authorization; Darwinex-Demo does:
+#   '<login>': authorized on <server> through <access point> (ping: 64.14 ms, build 6230)
+# (the build there is the server's).
 LOG_BUILD_RE = re.compile(r"MetaTrader 5 .*?build (\d+) started", re.IGNORECASE)
 LOG_SYSTEM_RE = re.compile(r"\t(Windows .* on Wine [^,]+)", re.IGNORECASE)
 LOG_LAUNCHED_WITH_RE = re.compile(r"launched with (.+?)\s*$", re.IGNORECASE)
 LOG_AUTHORIZED_DETAIL_RE = re.compile(
     r"'(?P<account>[^']+)': authorized on (?P<server>\S+)"
-    r"(?: through (?P<access>.+?))?(?: \(ping: (?P<ping>[0-9.]+) ?ms\))?\s*$",
+    r"(?: through (?P<access>.+?))?(?: \(ping: (?P<ping>[0-9.]+) ?ms[^)]*\))?\s*$",
     re.IGNORECASE,
 )
 LOG_SYNCHRONIZED_RE = re.compile(

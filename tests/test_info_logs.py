@@ -60,6 +60,16 @@ def test_journal_info_without_login_this_session() -> None:
     assert info.account is None and info.trading_disabled is None
 
 
+def test_journal_info_reads_the_demo_servers_ping() -> None:
+    """Darwinex-Demo, observed: the server's build follows the ping."""
+    line = (
+        "X\t0\t1\tNetwork\t'3': authorized on Example-Demo through Access Server Demo MT5 "
+        "(ping: 64.14 ms, build 6230)"
+    )
+    info = operations.journal_info("t", line)
+    assert (info.access_point, info.ping_ms) == ("Access Server Demo MT5", 64.14)
+
+
 def test_journal_info_takes_a_ping_if_written() -> None:
     line = "X\t0\t1\tNetwork\t'1': authorized on S-1 through Access Server C (ping: 12.5 ms)"
     info = operations.journal_info("t", line)
